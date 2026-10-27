@@ -1,9 +1,9 @@
 import { memo } from 'react'
 import { motion } from 'motion/react'
-import { ago, compact, duration, tildify } from '../format.ts'
+import { ago, compact, duration } from '../format.ts'
 import { has, t, useT } from '../i18n/index.ts'
 import { tokenTotal, type Session } from '../types.ts'
-import { AgentBadge, Icon, Meter, StatusPill, shortModel, shortTool, statusView } from './bits.tsx'
+import { AgentBadge, Icon, Meter, StatusPill, sessionPlace, sessionTitle, shortModel, shortTool, statusView } from './bits.tsx'
 import { EASE } from './motion.tsx'
 
 export const sessionTokens = (s: Session) =>
@@ -74,7 +74,7 @@ const Activity = ({ s, now }: { s: Session; now: number }) => {
 export const SessionCard = memo(function SessionCard({ s, now, onOpen, i = 0 }: { s: Session; now: number; onOpen: (key: string) => void; i?: number }) {
   useT()
   const view = statusView(s)
-  const project = s.meta.project ?? s.session_id.slice(0, 8)
+  const title = sessionTitle(s)
   const agents = s.subagents?.length ?? 0
   return (
     <motion.article
@@ -83,7 +83,7 @@ export const SessionCard = memo(function SessionCard({ s, now, onOpen, i = 0 }: 
       tabIndex={0}
       onClick={() => onOpen(s.key)}
       onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen(s.key))}
-      aria-label={`${project}: ${view.label}`}
+      aria-label={`${title}: ${view.label}`}
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.25 } }}
@@ -92,9 +92,9 @@ export const SessionCard = memo(function SessionCard({ s, now, onOpen, i = 0 }: 
       <header className="card-head">
         <AgentBadge agent={s.agent} />
         <div className="card-title">
-          <h3>{project}</h3>
+          <h3 title={title}>{title}</h3>
           <span className="card-path" title={s.meta.cwd}>
-            {tildify(s.meta.cwd) ?? s.session_id}
+            {sessionPlace(s)}
           </span>
         </div>
         <StatusPill view={view} since={s.status_since} now={now} />

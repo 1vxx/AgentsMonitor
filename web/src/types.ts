@@ -14,6 +14,8 @@ export interface SessionMeta {
   surface?: string
   interactive?: boolean
   transcript_path?: string
+  /** The short title the agent gave the session, when it has one. */
+  title?: string
 }
 
 export interface ContextUsage {
@@ -120,6 +122,7 @@ export interface SummaryItem {
   key: string
   agent: string
   project: string
+  title?: string
   status: Status
   since: number
   tool?: string

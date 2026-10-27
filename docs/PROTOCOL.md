@@ -32,7 +32,7 @@ Fields marked `?` are optional.
 
 | `type` | Fields |
 | --- | --- |
-| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `agent_version?` `surface?` `interactive?` `transcript_path?` |
+| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `agent_version?` `surface?` `interactive?` `transcript_path?` `title?` (the session's short title; the daemon also reads Claude Code's from its transcript) |
 | `session.end` | `reason?` |
 | `heartbeat` | `busy?` and session metadata |
 | `prompt` | `preview?` |

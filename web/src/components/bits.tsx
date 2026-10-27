@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { agentInfo } from '../agents.ts'
-import { duration, pct } from '../format.ts'
+import { duration, pct, tildify } from '../format.ts'
 import { t } from '../i18n/index.ts'
 import type { Session } from '../types.ts'
 import { EASE, Numeral } from './motion.tsx'
@@ -43,6 +43,13 @@ export const statusView = (s: StatusFacts): StatusView => {
     }
   }
 }
+
+/** What a session is called: the title its agent gave it, else its folder, else its id. */
+export const sessionTitle = (s: Pick<Session, 'meta' | 'session_id'>) => s.meta.title || s.meta.project || s.session_id.slice(0, 8)
+
+/** The line under a session's title: its folder when the title is the agent's, its path otherwise. */
+export const sessionPlace = (s: Pick<Session, 'meta' | 'session_id'>) =>
+  (s.meta.title ? s.meta.project : undefined) ?? tildify(s.meta.cwd) ?? s.session_id
 
 export const shortTool = (tool: string) => (tool.startsWith('mcp__') ? tool.split('__').slice(1).join(' · ') : tool)
 

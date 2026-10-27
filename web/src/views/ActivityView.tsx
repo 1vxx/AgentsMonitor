@@ -4,7 +4,7 @@ import { api } from '../api.ts'
 import { clock } from '../format.ts'
 import { t, useT, type Key } from '../i18n/index.ts'
 import { seedFeed, useLive } from '../store.ts'
-import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
+import { AgentBadge, Empty, Seg, sessionTitle } from '../components/bits.tsx'
 import { describe } from '../components/events.tsx'
 import { rise } from '../components/motion.tsx'
 
@@ -62,7 +62,7 @@ export const ActivityView = ({ onOpen }: { onOpen: (key: string) => void }) => {
                 <time>{clock(r.ts)}</time>
                 <span className="feed-dot" aria-hidden />
                 <AgentBadge agent={r.agent} />
-                <span className="feed-project">{s?.meta.project ?? r.key.split(':')[1]?.slice(0, 8)}</span>
+                <span className="feed-project">{s ? sessionTitle(s) : r.key.split(':')[1]?.slice(0, 8)}</span>
                 <span className="feed-kind">{d.kind}</span>
                 <span className="feed-text">
                   {d.text}

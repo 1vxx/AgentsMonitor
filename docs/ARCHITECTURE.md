@@ -22,6 +22,7 @@ Claude Code OTel ─── OTLP JSON ─▶   /v1/logs ─▶ token ledger ─�
 | Janitor | `src/janitor.rs` | Follows deletion and archiving in Claude, applies retention, compacts the database |
 | OTLP | `src/otlp.rs` | Reads token counts from OTLP/HTTP JSON log exports |
 | Desktop | `src/desktop.rs` | Reads Claude Desktop's archive state |
+| Titles | `src/titles.rs` | Reads the short title Claude Code gives each session from its transcript |
 
 The daemon runs on a single-threaded Tokio runtime. File system and database work that may block runs on the blocking pool.
 
@@ -96,6 +97,7 @@ The janitor runs on two schedules.
 - An ended session whose transcript no longer exists was deleted in Claude Code, or never kept one. A running session whose transcript existed and is now gone was deleted while running. Both are forgotten at once. A 24 h tombstone stops a late heartbeat or end event from recreating them; a new `session.start` may.
 - A session archived in Claude Desktop leaves memory, and therefore the live view, but stays in the store. `desktop.rs` reads `archived-sessions.idx` only when it changes and maps each local id to the Claude Code session id through `cliSessionId` in `local_<id>.json`. The format is internal to Claude Desktop: it is read-only and best effort, and anything unreadable is skipped.
 - A session that reappears after leaving memory (unarchived, or resumed days later) is reloaded from the store, so its statistics continue.
+- Each Claude Code session takes its title from its transcript, where Claude Code writes `custom-title` (a `/rename`, or Claude Desktop's title), `ai-title` (its generated one) and `agent-name` lines. The latest of each kind counts and the kinds rank in that order. `titles.rs` reads only what each transcript gained since the last pass and parses only lines that name a title kind. Like the Desktop records, the format is internal: read-only and best effort. A stored session out of memory without a title is looked at once by the 10 min pass.
 
 **At start and every 10 min**, and on demand through `POST /v1/maintenance`:
 

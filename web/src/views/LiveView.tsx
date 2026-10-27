@@ -5,7 +5,7 @@ import { clock } from '../format.ts'
 import { rich, t, useT } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { Session, Status } from '../types.ts'
-import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
+import { AgentBadge, Empty, Seg, sessionTitle } from '../components/bits.tsx'
 import { describe } from '../components/events.tsx'
 import { EASE, Numeral, rise } from '../components/motion.tsx'
 import { SessionCard } from '../components/SessionCard.tsx'
@@ -87,7 +87,7 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
                 <span className="feed-dot" aria-hidden />
                 <span className="feed-body">
                   <span className="feed-line">
-                    <span className="feed-project">{s?.meta.project ?? r.key.split(':')[1]?.slice(0, 8)}</span>
+                    <span className="feed-project">{s ? sessionTitle(s) : r.key.split(':')[1]?.slice(0, 8)}</span>
                     <AgentBadge agent={r.agent} />
                   </span>
                   <span className="feed-text">

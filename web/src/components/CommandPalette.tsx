@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { api } from '../api.ts'
-import { ago, tildify } from '../format.ts'
+import { ago } from '../format.ts'
 import { LOCALES, inAll, setLocale, useLocale, useT } from '../i18n/index.ts'
 import { TABS, THEMES, isMac, type Theme } from '../nav.ts'
 import { useLive } from '../store.ts'
 import type { Session } from '../types.ts'
-import { AgentBadge, SearchIcon, StatusPill, statusView } from './bits.tsx'
+import { AgentBadge, SearchIcon, StatusPill, sessionPlace, sessionTitle, statusView } from './bits.tsx'
 import { EASE } from './motion.tsx'
 
 // ⌘K: find any session, live or past, jump to a view, change the theme or
@@ -22,7 +22,7 @@ interface Item {
   run: () => void
 }
 
-const haystack = (s: Session) => [s.meta.project, s.meta.cwd, s.session_id, s.last_prompt].filter(Boolean).join(' ').toLowerCase()
+const haystack = (s: Session) => [s.meta.title, s.meta.project, s.meta.cwd, s.session_id, s.last_prompt].filter(Boolean).join(' ').toLowerCase()
 
 export const CommandPalette = ({
   now,
@@ -72,8 +72,8 @@ export const CommandPalette = ({
       id: s.key,
       group: t('pal.sessions'),
       lead: <AgentBadge agent={s.agent} />,
-      title: s.meta.project ?? s.session_id.slice(0, 8),
-      sub: <span className="mono">{tildify(s.meta.cwd) ?? s.session_id}</span>,
+      title: sessionTitle(s),
+      sub: <span className="mono">{sessionPlace(s)}</span>,
       aside: s.status === 'ended' ? <span className="muted small">{ago(s.updated_at, now)}</span> : <StatusPill view={statusView(s)} />,
       run: () => onOpen(s.key),
     }))

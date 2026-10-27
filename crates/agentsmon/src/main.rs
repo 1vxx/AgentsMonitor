@@ -13,6 +13,7 @@ mod service;
 mod store;
 mod summary;
 mod sys;
+mod titles;
 mod util;
 
 use std::collections::HashSet;

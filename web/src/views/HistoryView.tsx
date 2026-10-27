@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { api } from '../api.ts'
-import { compact, dateTime, duration, tildify } from '../format.ts'
+import { compact, dateTime, duration } from '../format.ts'
 import { useT } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { Session } from '../types.ts'
-import { AgentBadge, Empty, SearchIcon, StatusPill, statusView } from '../components/bits.tsx'
+import { AgentBadge, Empty, SearchIcon, StatusPill, sessionPlace, sessionTitle, statusView } from '../components/bits.tsx'
 import { Numeral, rise } from '../components/motion.tsx'
 import { sessionTokens } from '../components/SessionCard.tsx'
 import { AgentFilter } from './LiveView.tsx'
@@ -66,7 +66,7 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
     // Live copies are fresher than the page
     const merged = rows.map(r => live.get(r.key) ?? r)
     return needle
-      ? merged.filter(s => [s.meta.project, s.meta.cwd, s.session_id, s.last_prompt].some(v => v?.toLowerCase().includes(needle)))
+      ? merged.filter(s => [s.meta.title, s.meta.project, s.meta.cwd, s.session_id, s.last_prompt].some(v => v?.toLowerCase().includes(needle)))
       : merged
   }, [rows, live, q])
 
@@ -127,8 +127,10 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
                       <div className="cell-project">
                         <AgentBadge agent={s.agent} />
                         <div className="cell-project-text">
-                          <div className="cell-title">{s.meta.project ?? s.session_id.slice(0, 8)}</div>
-                          <div className="cell-path mono">{tildify(s.meta.cwd)}</div>
+                          <div className="cell-title">{sessionTitle(s)}</div>
+                          <div className="cell-path mono" title={s.meta.cwd}>
+                            {sessionPlace(s)}
+                          </div>
                         </div>
                       </div>
                     </td>

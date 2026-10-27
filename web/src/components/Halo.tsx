@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef } from 'react'
 import type { Mood, Session } from '../types.ts'
-import { statusView, type Tone } from './bits.tsx'
+import { sessionTitle, statusView, type Tone } from './bits.tsx'
 import { Orb } from './Orb.tsx'
 
 // The mood orb at the centre of its own small system: graduated rings like an
@@ -45,7 +45,7 @@ export const Halo = ({ mood, sessions, onOpen, size = 224 }: { mood: Mood; sessi
         .filter(s => s.status !== 'ended')
         .sort((a, b) => (a.key < b.key ? -1 : 1))
         .slice(0, 16)
-        .map((s, i) => ({ key: s.key, tone: statusView(s).tone, ring: i % 2 ? R_OUT : R_IN, label: `${s.meta.project ?? s.session_id.slice(0, 8)} · ${statusView(s).label}` })),
+        .map((s, i) => ({ key: s.key, tone: statusView(s).tone, ring: i % 2 ? R_OUT : R_IN, label: `${sessionTitle(s)} · ${statusView(s).label}` })),
     [sessions],
   )
   const nodes = useRef(new Map<string, SVGGElement>())

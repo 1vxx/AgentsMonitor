@@ -70,6 +70,7 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                     .clone()
                     .or_else(|| s.meta.cwd.as_deref().map(project_name))
                     .unwrap_or_else(|| s.session_id.chars().take(8).collect()),
+                title: s.meta.title.clone(),
                 status: s.status,
                 since: s.status_since,
                 tool: s.tools.last().map(|t| t.tool.clone()),

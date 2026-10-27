@@ -590,6 +590,29 @@ impl Hub {
         hidden
     }
 
+    /// Gives sessions in memory their titles; returns how many changed.
+    pub fn set_titles(&self, titles: &[(String, String)]) -> usize {
+        let mut st = self.state.lock();
+        let mut out = Vec::new();
+        let mut changed = 0;
+        for (key, title) in titles {
+            let Some(s) = st.sessions.get_mut(key) else { continue };
+            if s.meta.title.as_deref() == Some(title.as_str()) {
+                continue;
+            }
+            s.meta.title = Some(title.clone());
+            out.push(Msg::Session { session: s }.out());
+            self.store.send(Op::Session(Box::new(s.clone())));
+            changed += 1;
+        }
+        if changed > 0 {
+            self.refresh_summary(&mut st, now_ms(), &mut out);
+        }
+        drop(st);
+        self.publish(out);
+        changed
+    }
+
     /// What the janitor checks of each session in memory.
     pub fn presence(&self) -> Vec<Presence> {
         let st = self.state.lock();

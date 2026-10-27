@@ -67,6 +67,10 @@ pub struct SessionMeta {
     pub interactive: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_path: Option<String>,
+    /// The short title the agent gave the session (Claude Code: a rename,
+    /// Claude Desktop's title or its own generated one), when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 impl SessionMeta {
@@ -77,7 +81,7 @@ impl SessionMeta {
         macro_rules! take {
             ($($f:ident),*) => { $( if other.$f.is_some() { self.$f = other.$f.clone(); } )* };
         }
-        take!(cwd, project, model, permission_mode, agent_version, surface, interactive, transcript_path);
+        take!(cwd, project, model, permission_mode, agent_version, surface, interactive, transcript_path, title);
         *self != before
     }
 
@@ -612,6 +616,9 @@ pub struct SummaryItem {
     pub key: String,
     pub agent: String,
     pub project: String,
+    /// The session's own short title, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub status: Status,
     pub since: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

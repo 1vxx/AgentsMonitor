@@ -6,7 +6,7 @@ import { clock, compact, dateTime, duration, tildify, useNow } from '../format.t
 import { useT } from '../i18n/index.ts'
 import { onEvent, useLive } from '../store.ts'
 import type { EventRecord, Session } from '../types.ts'
-import { Icon, Meter, StatusPill, shortModel, shortTool, statusView } from './bits.tsx'
+import { Icon, Meter, StatusPill, sessionTitle, shortModel, shortTool, statusView } from './bits.tsx'
 import { describe } from './events.tsx'
 import { EASE, Numeral } from './motion.tsx'
 
@@ -115,7 +115,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
             <header className="drawer-head">
               <div className="drawer-title">
                 <div className="label">{t('drawer.kicker', { agent: agentInfo(s.agent).label })}</div>
-                <h2>{s.meta.project ?? s.session_id.slice(0, 8)}</h2>
+                <h2>{sessionTitle(s)}</h2>
                 <span className="drawer-path mono">{tildify(s.meta.cwd) ?? s.session_id}</span>
               </div>
               <button className="icon-btn drawer-close" onClick={onClose} aria-label={t('common.close')}>

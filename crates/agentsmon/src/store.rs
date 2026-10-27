@@ -120,6 +120,8 @@ pub enum Op {
     Quota(Quota),
     Sample(QuotaSample),
     Forget(String),
+    /// Sets the title of a stored session that is not in memory.
+    Title { key: String, title: String },
     Usage(UsageRecord),
     /// Prunes and folds by the cut-offs, then gives the space back to the
     /// file system.
@@ -229,6 +231,7 @@ fn write_loop(mut conn: Connection, rx: Receiver<Op>) {
 fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
     // A session changed many times in one batch is written once.
     let mut sessions: HashMap<String, Box<Session>> = HashMap::new();
+    let mut titles: Vec<(String, String)> = Vec::new();
     let tx = conn.transaction()?;
     for op in ops {
         match op {
@@ -271,6 +274,7 @@ fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
                     u.cache_write as i64,
                 ])?;
             }
+            Op::Title { key, title } => titles.push((key, title)),
             Op::Flush(_) => {}
             Op::Maintain(c) => {
                 tx.execute("DELETE FROM events WHERE ts < ?1", [c.events])?;
@@ -289,6 +293,9 @@ fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
             "INSERT OR REPLACE INTO sessions (key, agent, status, started_at, updated_at, ended_at, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?
         .execute(params![s.key, s.agent, s.status.as_str(), s.started_at, s.updated_at, s.ended_at, data])?;
+    }
+    for (key, title) in titles {
+        tx.prepare_cached("UPDATE sessions SET data = json_set(data, '$.meta.title', ?2) WHERE key = ?1")?.execute(params![key, title])?;
     }
     tx.commit()
 }
@@ -502,6 +509,15 @@ pub fn ended_sessions(c: &Connection) -> rusqlite::Result<Vec<(String, i64, Opti
     let mut stmt =
         c.prepare("SELECT key, ended_at, json_extract(data, '$.meta.transcript_path') FROM sessions WHERE ended_at IS NOT NULL")?;
     stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+}
+
+/// Stored sessions with a transcript but no title yet, most recent first.
+pub fn untitled_sessions(c: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut stmt = c.prepare(
+        "SELECT key, json_extract(data, '$.meta.transcript_path') AS path FROM sessions
+         WHERE path IS NOT NULL AND json_extract(data, '$.meta.title') IS NULL ORDER BY updated_at DESC LIMIT 500",
+    )?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
 }
 
 /// Request ids counted since `since`, so a delivery repeated across a

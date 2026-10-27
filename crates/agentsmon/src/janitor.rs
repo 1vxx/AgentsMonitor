@@ -1,6 +1,7 @@
 //! Keeps the daemon's data bounded and in step with Claude Code's own:
 //! forgets ended sessions once they are old enough or once Claude Code
-//! deleted their transcript, and has the store prune and fold the rest.
+//! deleted their transcript, has the store prune and fold the rest, and
+//! picks up the titles Claude Code gives its sessions.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -12,6 +13,7 @@ use crate::config::Retention;
 use crate::desktop::Desktop;
 use crate::hub::Hub;
 use crate::store::{self, Cutoffs, Op};
+use crate::titles::{self, Titles};
 use crate::util::now_ms;
 
 const DAY_MS: i64 = 86_400_000;
@@ -92,11 +94,15 @@ pub struct Watch {
     /// Sessions whose transcript was there once.
     seen: HashSet<String>,
     desktop: Desktop,
+    /// How far each live session's transcript has been read for its title.
+    titles: Titles,
+    /// Stored sessions already looked at for a title, found or not.
+    titles_tried: HashSet<String>,
 }
 
 impl Default for Watch {
     fn default() -> Watch {
-        Watch { seen: HashSet::new(), desktop: Desktop::new() }
+        Watch { seen: HashSet::new(), desktop: Desktop::new(), titles: Titles::default(), titles_tried: HashSet::new() }
     }
 }
 
@@ -112,10 +118,11 @@ pub struct Quick {
 /// dashboard shows). Deleted in Claude Code: an ended session whose
 /// transcript is gone (or never was), a running one whose transcript was
 /// there and is gone; those are forgotten. Archived in Claude Desktop: taken
-/// out of the live view, kept in the history.
+/// out of the live view, kept in the history. The rest get the title their
+/// transcript gives them.
 pub fn quick_pass(hub: &Hub) -> Quick {
     let mut watch = hub.watch.lock();
-    let Watch { seen, desktop } = &mut *watch;
+    let Watch { seen, desktop, titles, .. } = &mut *watch;
     let sessions = hub.presence();
     let mut gone = Vec::new();
     if hub.retention.follow_transcripts {
@@ -140,13 +147,47 @@ pub fn quick_pass(hub: &Hub) -> Quick {
         .filter(|s| !gone.contains(&s.key))
         .map(|s| s.key.clone())
         .collect();
+    let readable: Vec<(String, String)> = sessions
+        .iter()
+        .filter(|s| s.agent == agentsmon_protocol::agents::CLAUDE_CODE && !gone.contains(&s.key))
+        .filter_map(|s| Some((s.key.clone(), s.transcript.clone()?)))
+        .collect();
+    let named = titles.scan(&readable);
     drop(watch);
 
+    hub.set_titles(&named);
     let quick = Quick { deleted: hub.forget_many(&gone), archived: hub.hide_many(&archived) };
     if quick != Quick::default() {
         tracing::info!("{} sessions deleted in Claude Code forgotten, {} archived ones out of the live view", quick.deleted, quick.archived);
     }
     quick
+}
+
+/// Stored sessions from before titles were read (or that ended while the
+/// daemon was away) get theirs from the transcript, each looked at once.
+fn backfill_titles(hub: &Hub) {
+    let in_memory: HashSet<String> = hub.presence().into_iter().map(|p| p.key).collect();
+    let untitled = match hub.store().read(store::untitled_sessions) {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("janitor could not read untitled sessions: {e}");
+            return;
+        }
+    };
+    let mut watch = hub.watch.lock();
+    let mut titled = 0;
+    for (key, path) in untitled {
+        if in_memory.contains(&key) || !watch.titles_tried.insert(key.clone()) {
+            continue;
+        }
+        if let Some(title) = titles::read(&path) {
+            hub.store().send(Op::Title { key, title });
+            titled += 1;
+        }
+    }
+    if titled > 0 {
+        tracing::info!("titled {titled} stored sessions from their transcripts");
+    }
 }
 
 /// One pass, the scheduled one or one a person asked for. Blocking (file
@@ -180,6 +221,7 @@ pub fn run(hub: &Hub, scope: Scope) -> Report {
             pass.ended
         );
     }
+    backfill_titles(hub);
     store.send(Op::Maintain(cutoffs(now, &retention)));
     store.flush(wait);
     pass.transcript_gone += quick.deleted;
@@ -272,12 +314,14 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("local_x.json"), r#"{"cliSessionId":"archived","isArchived":true}"#).unwrap();
         std::fs::write(folder.join("archived-sessions.idx"), r#"{"v":1,"archived":["local_x"]}"#).unwrap();
-        *hub.watch.lock() = Watch { seen: HashSet::new(), desktop: Desktop::at(dir.join("desktop")) };
+        *hub.watch.lock() = Watch { desktop: Desktop::at(dir.join("desktop")), ..Watch::default() };
 
         let file = |name: &str| dir.join(name).to_string_lossy().to_string();
-        for name in ["ended.jsonl", "running.jsonl", "kept.jsonl", "archived.jsonl"] {
+        for name in ["ended.jsonl", "running.jsonl"] {
             std::fs::write(file(name), "{}").unwrap();
         }
+        std::fs::write(file("kept.jsonl"), "{\"type\":\"ai-title\",\"aiTitle\":\"Kept work\"}\n").unwrap();
+        std::fs::write(file("archived.jsonl"), "{\"type\":\"custom-title\",\"customTitle\":\"Old work\"}\n").unwrap();
         let start = |sid: &str, path: &str| format!(r#"{{"agent":"claude-code","sid":"{sid}","type":"session.start","transcript_path":"{path}"}}"#);
         let end = |sid: &str| format!(r#"{{"agent":"claude-code","sid":"{sid}","type":"session.end"}}"#);
         let env = |json: &str| serde_json::from_str::<agentsmon_protocol::Envelope>(json).unwrap();
@@ -293,6 +337,8 @@ mod tests {
         ]);
         assert!(hub.store().flush(std::time::Duration::from_secs(5)));
         assert_eq!(quick_pass(&hub), Quick { deleted: 0, archived: 1 });
+        // A session in memory takes its title from the transcript.
+        assert_eq!(hub.session("claude-code:kept").and_then(|s| s.meta.title).as_deref(), Some("Kept work"));
 
         // Deleted in Claude Code: one after it ended, one while it ran.
         std::fs::remove_file(file("ended.jsonl")).unwrap();
@@ -305,6 +351,11 @@ mod tests {
         // The archived one left the live view only: the history keeps it.
         assert!(hub.store().flush(std::time::Duration::from_secs(5)));
         assert!(hub.store().read(|c| store::session(c, "claude-code:archived")).unwrap().is_some());
+        // ...and a stored one out of memory gets its title in the store.
+        backfill_titles(&hub);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        let stored = hub.store().read(|c| store::session(c, "claude-code:archived")).unwrap().unwrap();
+        assert_eq!(stored.meta.title.as_deref(), Some("Old work"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

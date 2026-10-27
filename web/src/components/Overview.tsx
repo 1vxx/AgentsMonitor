@@ -22,12 +22,12 @@ const headline = (summary: Summary | undefined, conn: string): { title: ReactNod
       return {
         key: `attention-${c.waiting}`,
         title: rich(c.waiting > 1 ? t('cover.waitingMany', { n: c.waiting }) : t('cover.waitingOne')),
-        sub: top ? `${top.project} · ${agentInfo(top.agent).label}` : '',
+        sub: top ? `${top.title ?? top.project} · ${agentInfo(top.agent).label}` : '',
       }
     case 'working':
       return { key: `working-${working}`, title: rich(t('cover.working', { n: working })), sub: t('cover.workingSub', { live: c.live, idle: c.idle }) }
     case 'error':
-      return { key: 'error', title: rich(t('cover.error')), sub: top ? `${top.project} · ${agentInfo(top.agent).label}` : '' }
+      return { key: 'error', title: rich(t('cover.error')), sub: top ? `${top.title ?? top.project} · ${agentInfo(top.agent).label}` : '' }
     case 'idle':
       return { key: 'idle', title: rich(t('cover.idle')), sub: t('cover.idleSub', { n: c.live }) }
     default:
