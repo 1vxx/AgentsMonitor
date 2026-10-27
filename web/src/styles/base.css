@@ -289,12 +289,21 @@ kbd {
   background: color-mix(in srgb, var(--agent) 12%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent) 28%, transparent);
 }
-/* A product's own mark on its own tile: Claude's clay spark on cream */
+/* A product's own mark on its own tile: Claude's clay spark on cream,
+   Codex's black blossom on white, as on its app icon */
 .agent-logo {
-  background: linear-gradient(150deg, #fdfbf6, #f1ebdf);
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.22), 0 1px 3px rgba(0, 0, 0, 0.18);
+  --mark-tile: linear-gradient(150deg, #fdfbf6, #f1ebdf);
+  --mark-ink: #d97757;
+  --mark-ring: rgba(217, 119, 87, 0.22);
+  background: var(--mark-tile);
+  box-shadow: inset 0 0 0 1px var(--mark-ring), 0 1px 3px rgba(0, 0, 0, 0.18);
 }
-.agent-logo svg { width: 62%; height: 62%; fill: #d97757; }
+.agent-logo[data-agent='codex'] {
+  --mark-tile: linear-gradient(150deg, #ffffff, #ececee);
+  --mark-ink: #0d0d0d;
+  --mark-ring: rgba(0, 0, 0, 0.12);
+}
+.agent-logo svg { width: 62%; height: 62%; fill: var(--mark-ink); }
 .agent-name { font-size: 14px; font-weight: 500; }
 .chip {
   display: inline-flex;

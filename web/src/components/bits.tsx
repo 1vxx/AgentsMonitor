@@ -110,7 +110,7 @@ export const AgentBadge = ({ agent, full }: { agent: string; full?: boolean }) =
   const info = agentInfo(agent)
   return (
     <span className="agent" title={info.label} style={{ ['--agent' as string]: info.color }}>
-      <span className={info.logo ? 'agent-mark agent-logo' : 'agent-mark'}>
+      <span className={info.logo ? 'agent-mark agent-logo' : 'agent-mark'} data-agent={agent}>
         {info.logo ? (
           <svg viewBox="0 0 24 24" aria-hidden>
             <path d={info.logo} />
