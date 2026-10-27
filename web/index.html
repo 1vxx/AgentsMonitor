@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <script>
+      // The chosen theme, set before the first paint so the page never opens
+      // in the system one and then switches. nav.ts keeps it under this key.
+      try {
+        const v = localStorage.getItem('agentsmon.theme')
+        if (v === 'dark' || v === 'light') document.documentElement.dataset.theme = v
+      } catch {}
+    </script>
     <title>AgentsMonitor</title>
     <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#05060b" media="(prefers-color-scheme: dark)" />

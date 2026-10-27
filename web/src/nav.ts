@@ -14,6 +14,7 @@ export const tabFromHash = (): Tab => {
 
 export type Theme = 'system' | 'dark' | 'light'
 export const THEMES: readonly Theme[] = ['system', 'light', 'dark']
+// index.html reads the same key to set the theme before the first paint
 const THEME_KEY = 'agentsmon.theme'
 
 export const readTheme = (): Theme => {
