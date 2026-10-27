@@ -32,56 +32,60 @@ export const AgentFilter = ({ agents, value, onChange }: { agents: string[]; val
 const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
   const feed = useLive(s => s.feed)
   const sessions = useLive(s => s.sessions)
+  const conn = useLive(s => s.conn)
   const first = useRef(true)
   useEffect(() => {
     first.current = false
   }, [])
 
+  // Headed like the sessions beside it, so both columns start on one line
   return (
-    <motion.aside className="live-feed" aria-label="实时动态" {...rise(3)}>
-      <div className="feed-head">
+    <motion.aside className="live-side" aria-label="实时动态" {...rise(3)}>
+      <div className="section-head">
         <div className="section-lead">
           <span className="kicker">
             <b>03</b> Telemetry
           </span>
-          <h2 className="section-title section-title-sm">实时动态</h2>
+          <h2 className="section-title">实时动态</h2>
         </div>
-        <span className="label feed-live">
-          <span className="live-dot conn-open" aria-hidden />
-          实时
+        <span className="feed-live">
+          <span className={`live-dot conn-${conn}`} aria-hidden />
+          {conn === 'open' ? '实时' : '重连中'}
         </span>
       </div>
-      <motion.ol className="feed" layoutScroll>
-        {feed.slice(0, 80).map((r, i) => {
-          const d = describe(r)
-          const s = sessions.get(r.key)
-          return (
-            <motion.li
-              key={r.seq}
-              layout="position"
-              className={`feed-row tone-${d.tone}`}
-              onClick={() => onOpen(r.key)}
-              initial={first.current ? { opacity: 0, y: 8 } : { opacity: 0, x: -14 }}
-              animate={{ opacity: 1, x: 0, y: 0 }}
-              transition={{ duration: 0.55, ease: EASE, delay: first.current ? Math.min(i, 14) * 0.035 : 0, layout: { duration: 0.45, ease: EASE, delay: 0 } }}
-            >
-              <time>{clock(r.ts)}</time>
-              <span className="feed-dot" aria-hidden />
-              <span className="feed-body">
-                <span className="feed-line">
-                  <span className="feed-project">{s?.meta.project ?? r.key.split(':')[1]?.slice(0, 8)}</span>
-                  <AgentBadge agent={r.agent} />
+      <div className="live-feed">
+        <motion.ol className="feed" layoutScroll>
+          {feed.slice(0, 80).map((r, i) => {
+            const d = describe(r)
+            const s = sessions.get(r.key)
+            return (
+              <motion.li
+                key={r.seq}
+                layout="position"
+                className={`feed-row tone-${d.tone}`}
+                onClick={() => onOpen(r.key)}
+                initial={first.current ? { opacity: 0, y: 8 } : { opacity: 0, x: -14 }}
+                animate={{ opacity: 1, x: 0, y: 0 }}
+                transition={{ duration: 0.55, ease: EASE, delay: first.current ? Math.min(i, 14) * 0.035 : 0, layout: { duration: 0.45, ease: EASE, delay: 0 } }}
+              >
+                <time>{clock(r.ts)}</time>
+                <span className="feed-dot" aria-hidden />
+                <span className="feed-body">
+                  <span className="feed-line">
+                    <span className="feed-project">{s?.meta.project ?? r.key.split(':')[1]?.slice(0, 8)}</span>
+                    <AgentBadge agent={r.agent} />
+                  </span>
+                  <span className="feed-text">
+                    <span className="feed-kind">{d.kind}</span> {d.text}
+                  </span>
+                  {d.detail && <span className="feed-detail mono">{d.detail}</span>}
                 </span>
-                <span className="feed-text">
-                  <span className="feed-kind">{d.kind}</span> {d.text}
-                </span>
-                {d.detail && <span className="feed-detail mono">{d.detail}</span>}
-              </span>
-            </motion.li>
-          )
-        })}
-        {feed.length === 0 && <li className="tl-empty">等待事件…</li>}
-      </motion.ol>
+              </motion.li>
+            )
+          })}
+          {feed.length === 0 && <li className="tl-empty">等待事件…</li>}
+        </motion.ol>
+      </div>
     </motion.aside>
   )
 }

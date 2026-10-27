@@ -192,7 +192,36 @@
 
 /* ---------- Live ---------- */
 .live { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 28px; align-items: start; margin-top: 6px; }
-.live-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.live-main, .live-side { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+/* Both column heads stand on one graduated line, broken only by the gap
+   between them, where a small diamond marks the joint */
+.live .section-head { --rule: color-mix(in srgb, var(--ion) 35%, var(--border-2)); position: relative; padding-bottom: 14px; }
+.live .section-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--rule), var(--rule)) left bottom / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 40px) left bottom / 100% 5px no-repeat;
+}
+.live-main .section-head::after { mask-image: linear-gradient(90deg, transparent, #000 22%); -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%); }
+.live-side .section-head::after { mask-image: linear-gradient(90deg, #000 65%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 65%, transparent); }
+.live-side .section-head::before {
+  content: '';
+  position: absolute;
+  left: -17px;
+  bottom: -2.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--ion);
+  box-shadow: 0 0 8px var(--ion);
+  transform: rotate(45deg);
+}
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
 
 @property --angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
@@ -302,10 +331,10 @@
 .ended-body .cards { padding: 10px 2px 4px; }
 
 /* ---------- Feed: a telemetry log ---------- */
+.live-side { position: sticky; top: 92px; max-height: calc(100vh - 116px); }
 .live-feed {
-  position: sticky;
-  top: 92px;
-  max-height: calc(100vh - 116px);
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -316,9 +345,8 @@
   box-shadow: var(--glass-ring), var(--shadow-sm);
   overflow: hidden;
 }
-.feed-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
-.feed-live { display: inline-flex; align-items: center; gap: 7px; font: 500 10.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
-.feed { position: relative; list-style: none; margin: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain; }
+.feed-live { display: inline-flex; align-items: center; gap: 7px; padding-bottom: 6px; color: var(--text-3); font: 500 11px var(--mono); letter-spacing: 0.14em; }
+.feed { position: relative; flex: 1 1 auto; min-height: 0; list-style: none; margin: 0; padding: 10px 8px; overflow-y: auto; overscroll-behavior: contain; }
 .feed-row {
   position: relative;
   display: grid;

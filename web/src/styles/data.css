@@ -155,7 +155,10 @@
 /* ---------- Narrow screens ---------- */
 @media (max-width: 1360px) {
   .live { grid-template-columns: minmax(0, 1fr); }
-  .live-feed { position: static; max-height: 520px; }
+  .live-side { position: static; max-height: none; }
+  .live-feed { max-height: 520px; }
+  .live .section-head::after { mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+  .live-side .section-head::before { display: none; }
 }
 @media (max-width: 980px) {
   .cover-main { grid-template-columns: auto minmax(0, 1fr); }
