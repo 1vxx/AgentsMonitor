@@ -126,12 +126,12 @@ The daemon reads `~/.agentsmon/config.toml`. Every field is optional; `agentsmon
 
 | View | Shows |
 | --- | --- |
-| Live (实时) | Overall state, session counts, today's tokens, rate-limit meters; session cards ordered by urgency, with sessions waiting for you highlighted; recently ended sessions; live event feed |
+| Live | Overall state, session counts, today's tokens, rate-limit meters; session cards ordered by urgency, with sessions waiting for you highlighted; recently ended sessions; live event feed |
 | Session details | Context use, running tools and subagents, last prompt and answer, statistics, metadata, full timeline |
-| History (历史) | All stored sessions, with filter, search and paging |
-| Events (事件) | Global event stream, filterable by type |
-| Usage (用量) | Tokens for today, 24 h, 7 d, 30 d or all time, broken down by type, model and source, with an hourly or daily chart; rate-limit history |
-| Daemon (守护进程) | Uptime, memory, CPU, throughput, database size, retention policy, manual cleanup |
+| History | All stored sessions, with filter, search and paging |
+| Events | Global event stream, filterable by type |
+| Usage | Tokens for today, 24 h, 7 d, 30 d or all time, broken down by type, model and source, with an hourly or daily chart; rate-limit history |
+| Daemon | Uptime, memory, CPU, throughput, database size, retention policy, manual cleanup |
 
 The round indicator at the top of the Live view previews how the display device will show the overall state.
 
@@ -163,7 +163,7 @@ Storage stays bounded. Deleted space returns to the file system right away (incr
 | Event history, rate-limit readings | 30 days |
 | Token counts | Per request for 90 days, then per hour until 400 days, then per day until 5 years. Totals stay exact at every step |
 
-The daemon checks for deletions and archiving every 15 s and applies retention at start and every 10 min. The Daemon view runs a pass on demand (**立即清理**), or removes every ended session at once (**删除全部已结束会话**); token totals are never reduced. All periods can be changed under `[retention]` in the config file.
+The daemon checks for deletions and archiving every 15 s and applies retention at start and every 10 min. The Daemon view can run a pass on demand, or remove every ended session at once; token totals are never reduced. All periods can be changed under `[retention]` in the config file.
 
 Archive state is read from Claude Desktop's own session records (`~/Library/Application Support/Claude/claude-code-sessions/`). That format is not public: the daemon only reads it, and if it cannot, archived sessions simply follow the retention period.
 
