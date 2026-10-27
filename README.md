@@ -1,6 +1,20 @@
 # AgentsMonitor
 
-A local monitor for coding-agent sessions. It tracks every Claude Code and Codex session on the machine (what it is doing, which tool is running, whether it is waiting for you), along with context usage, exact token counts and account rate limits. A web dashboard shows the data, and a small AMOLED display will show it in a later phase.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange.svg)
+![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
+
+English | [简体中文](README.zh-CN.md)
+
+A local monitor for coding-agent sessions. It tracks every Claude Code and Codex session on the machine and shows them on a web dashboard; a small AMOLED display will show them in a later phase.
+
+## Features
+
+- **Live status** of every session: thinking, running a tool (and which), waiting for your approval or answer, compacting, idle
+- **Exact token counts** for every model request, read from the agents' own logs, with context fill and the account's five-hour and weekly limits
+- **Web dashboard**: live session cards, a timeline per session, history, the event stream and usage charts
+- **Out of the way**: hooks only queue events and return; the daemon uses about 7 MB of memory
+- **Local and bounded**: nothing leaves the machine, and every kind of data has a retention limit
 
 Claude Code and Codex are supported. Other agents each need only an adapter and an integration (see [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent)).
 
@@ -35,19 +49,44 @@ Codex ──(rollout logs, read by the daemon)─┤
 
 ## Requirements
 
-- Rust 1.85 or newer (2024 edition)
-- Node.js 20+ and pnpm, for the dashboard
+- Rust 1.95 or newer
+- Node.js 20.19+ or 22.12+, and pnpm, for the dashboard
 - Claude Code with hooks-module support (tested with 2.1.308)
 - Codex with plugins and lifecycle hooks (tested with 0.160.1), for Codex sessions
 - macOS for `agentsmon service` (launchd) and for Claude Desktop archive tracking; the daemon itself also runs on Linux
 
 ## Quick start
 
-### 1. Run the daemon
+Get the code; the commands below run from its folder:
 
 ```bash
-cargo install --path crates/agentsmon
+git clone https://github.com/1vxx/AgentsMonitor.git
 ```
+
+```bash
+cd AgentsMonitor
+```
+
+### 1. Install and run the daemon
+
+```bash
+cargo install --locked --path crates/agentsmon
+```
+
+This puts `agentsmon` in `~/.cargo/bin`.
+
+> [!NOTE]
+> rustup's own installer adds `~/.cargo/bin` to `PATH`. Homebrew's `rustup` does not (nor its own `bin`, where `cargo` is: see `brew info rustup`), so with it add the folder yourself:
+>
+> ```bash
+> echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+> ```
+>
+> Then load it in the open terminal (new terminals read it on their own):
+>
+> ```bash
+> source ~/.zshrc
+> ```
 
 ```bash
 agentsmon serve
@@ -59,6 +98,8 @@ agentsmon serve
 agentsmon service install
 ```
 
+To run it without installing anything, see [Running from source](#running-from-source).
+
 ### 2. Load the plugins
 
 This repository is also a plugin marketplace, for Claude Code and for Codex.
@@ -68,7 +109,7 @@ This repository is also a plugin marketplace, for Claude Code and for Codex.
 Install the plugin:
 
 ```bash
-claude plugin marketplace add /path/to/AgentsMonitor
+claude plugin marketplace add "$PWD"
 ```
 
 ```bash
@@ -77,7 +118,7 @@ claude plugin install agentsmon@agentsmon
 
 Installed this way it loads in every session, Claude Desktop ones included, and can be switched off and on again like any other plugin: in `/plugin`, or with `claude plugin disable agentsmon@agentsmon` and `claude plugin enable agentsmon@agentsmon`. The change applies to sessions started afterwards. A local marketplace is read straight from this folder, so edits to the plugin need no reinstall.
 
-To try it without installing, load it for a single session with `claude --plugin-dir /path/to/AgentsMonitor/plugins/claude-code`. Avoid loading it through `CLAUDE_CODE_PLUGIN_DIRS` as well as installing it: each session would then report everything twice.
+To try it without installing, load it for a single session with `claude --plugin-dir "$PWD/plugins/claude-code"`. Avoid loading it through `CLAUDE_CODE_PLUGIN_DIRS` as well as installing it: each session would then report everything twice.
 
 Plugin options:
 
@@ -91,7 +132,7 @@ Plugin options:
 Install it from the same marketplace:
 
 ```bash
-codex plugin marketplace add /path/to/AgentsMonitor
+codex plugin marketplace add "$PWD"
 ```
 
 ```bash
@@ -100,7 +141,75 @@ codex plugin add agentsmon@agentsmon
 
 Restart Codex, then trust the plugin's hooks with `/hooks` in the CLI or the hook review controls in the Codex app; Codex skips hooks that are not trusted. The hooks run `agentsmon`, so it must be in `~/.cargo/bin` (where `cargo install` puts it), `/opt/homebrew/bin`, `/usr/local/bin` or on Codex's `PATH`. See [plugins/codex](plugins/codex/README.md).
 
-### 3. Token counts and usage limits
+### 3. Open the dashboard
+
+```bash
+pnpm --dir web install
+```
+
+```bash
+pnpm --dir web dev
+```
+
+Then open http://127.0.0.1:5173. The dashboard reaches the daemon through the Vite proxy: set `AGENTSMON_URL` to use another daemon, and `AGENTSMON_TOKEN` if it requires a token. `pnpm --dir web start` serves a production build instead.
+
+## Running from source
+
+To run the daemon from this folder without installing anything, each run building the code as it is:
+
+```bash
+cargo run --release -p agentsmon -- serve
+```
+
+The Claude Code plugin talks to the daemon's socket and needs nothing more. Codex's hooks run the `agentsmon` binary itself (see [Codex](#codex)), so link the build where they look, once it has been built:
+
+```bash
+ln -s "$PWD/target/release/agentsmon" ~/.cargo/bin/agentsmon
+```
+
+## Updating
+
+`cargo install` copies the build, so after changing or pulling the code install it again:
+
+```bash
+git pull
+```
+
+```bash
+cargo install --locked --path crates/agentsmon
+```
+
+A running daemon keeps the old binary until it restarts. For the login service, `agentsmon service install` restarts it on the new one:
+
+```bash
+agentsmon service install
+```
+
+The Claude Code plugin is read from this folder and the dashboard reloads on its own under `pnpm --dir web dev`, so neither needs anything more.
+
+## Uninstalling
+
+Remove the service first, while `agentsmon` is still installed:
+
+```bash
+agentsmon service uninstall
+```
+
+```bash
+cargo uninstall agentsmon
+```
+
+```bash
+claude plugin uninstall agentsmon@agentsmon
+```
+
+```bash
+codex plugin remove agentsmon@agentsmon
+```
+
+`claude plugin marketplace remove agentsmon` and `codex plugin marketplace remove agentsmon` forget the marketplace too. The data stays in `~/.agentsmon`; delete that folder to remove it.
+
+## Token counts and usage limits
 
 Nothing to set up. The daemon reads every model request's token counts from the agents' own files, including requests made while it was down:
 
@@ -118,18 +227,6 @@ Some of Claude Code's requests write nothing to the transcript: context compacti
 ```
 
 The exporter sends only to the local daemon, and applies to sessions started after the change (quit and reopen Claude Desktop). A request both sources report counts once, by its request id. Where a session's transcript cannot be read, its token figures are estimates summed from turn ends, marked `≈`.
-
-### 4. Open the dashboard
-
-```bash
-pnpm --dir web install
-```
-
-```bash
-pnpm --dir web dev
-```
-
-Then open http://127.0.0.1:5173. The dashboard reaches the daemon through the Vite proxy: set `AGENTSMON_URL` to use another daemon, and `AGENTSMON_TOKEN` if it requires a token. `pnpm --dir web start` serves a production build instead.
 
 ## CLI
 
@@ -178,7 +275,7 @@ The status is derived from what is in flight, never set directly, so a lost or r
 | `idle` | Waiting for the next prompt; `last_turn` records how the last turn ended |
 | `ended` | The session has ended |
 
-A session that sends heartbeats and goes silent for 65 s is marked `stale`; after 30 min it ends as `lost`. After the machine wakes from sleep, sessions get 75 s to report in before silence counts.
+The Claude Code plugin sends a heartbeat every 20 s: a Claude Code session silent for 65 s is marked `stale`, and after 30 min it ends as `lost`. Codex's command hooks cannot send heartbeats, so a Codex session is never marked `stale` for silence and ends as `lost` after 12 h. After the machine wakes from sleep, sessions get 75 s to report in before silence counts.
 
 ## Data retention
 
@@ -219,6 +316,17 @@ The monitor must never slow an agent down:
 - `agentsmon hook`, which the Codex plugin and other command-hook agents use, forwards stdin without parsing it or starting an async runtime: about 5 ms per event, mostly process start-up.
 - Claude Code's transcripts and Codex's session logs are read every 2 s, only what each file gained, and only lines that name a reply, a token or a session record are parsed. Files not written to for a day are looked at once a minute, and a folder is listed again only when it changed. Files are read through a 64 KB buffer, so memory does not grow with them. Measured with 730 transcripts (845 MB): the first run counts their 12,000 requests in 0.9 s of CPU with a 26 MB peak; after that, reading them costs about 20 ms of CPU a minute.
 
+## Troubleshooting
+
+| Problem | What to do |
+| --- | --- |
+| `agentsmon: command not found` after `cargo install` | `~/.cargo/bin` is not on `PATH`: see the note under [Install and run the daemon](#1-install-and-run-the-daemon) |
+| The dashboard says "Daemon not connected" | Start the daemon (`agentsmon serve`, or `agentsmon service install`); the page reconnects on its own |
+| Claude Code sessions do not appear | The plugin applies to sessions started after it was installed; check it with `claude plugin list` |
+| Codex sessions do not appear | Trust the plugin's hooks with `/hooks`, and make sure `agentsmon` is where they look (see [Codex](#codex)) |
+| Every session shows "No signal" after the daemon restarts | Expected: each one returns when it next reports, a Claude Code session within 20 s |
+| Anything else | Run `AGENTSMON_LOG=debug agentsmon serve`; the login service logs to `~/.agentsmon/agentsmon.log` |
+
 ## Development
 
 ```bash
@@ -235,6 +343,8 @@ pnpm --dir web typecheck
 
 In Claude Desktop, the `dashboard` entry in `.claude/launch.json` previews the dashboard in the built-in browser.
 
+Issues and pull requests are welcome. Please run the checks above before opening a pull request.
+
 ## Roadmap
 
 - [x] Daemon, protocol, storage, REST and WebSocket API
@@ -244,3 +354,9 @@ In Claude Desktop, the `dashboard` entry in `.claude/launch.json` previews the d
 - [x] Bounded retention, following deletion and archiving in Claude
 - [x] Codex adapter and plugin; tokens, context and rate limits from its session logs
 - [ ] ESP32 display with a 1.75" AMOLED screen, driven by `/v1/summary`
+
+## License
+
+[MIT](LICENSE)
+
+AgentsMonitor is an independent project, not affiliated with or endorsed by Anthropic or OpenAI. Claude, Claude Code and Codex are trademarks of their respective owners.
