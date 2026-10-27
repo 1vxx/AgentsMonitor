@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { compact } from '../format.ts'
 import { tokenTotal, type TokenSeries, type TokenTotals } from '../types.ts'
 
@@ -39,6 +39,7 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
   const box = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(720)
   const [hover, setHover] = useState<number>()
+  const grad = `bars${useId().replace(/:/g, '')}`
 
   useLayoutEffect(() => {
     const el = box.current
@@ -69,7 +70,14 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
 
   return (
     <div className="chart" ref={box}>
-      <svg width={width} height={HEIGHT} role="img" aria-label="tokens 随时间分布">
+      <svg width={width} height={HEIGHT} role="img" aria-label="tokens 随时间分布" style={{ ['--bar' as string]: `url(#${grad})` }}>
+        <defs>
+          <linearGradient id={grad} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="var(--ion-2)" />
+            <stop offset="0.5" stopColor="var(--ion)" />
+            <stop offset="1" stopColor="var(--ion)" stopOpacity="0.25" />
+          </linearGradient>
+        </defs>
         {[0, 0.5, 1].map(f => (
           <g key={f}>
             <line className={f === 0 ? 'axis' : 'grid'} x1={PAD.left} x2={PAD.left + innerW} y1={y(top * f)} y2={y(top * f)} />

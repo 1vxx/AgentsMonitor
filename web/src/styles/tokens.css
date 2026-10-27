@@ -1,139 +1,189 @@
-/* Warm neutral: an ivory page, white surfaces, hairline borders, near-black
-   ink. Colour is kept for state and for the mood orb: clay works, amber waits
-   for you, olive is done, red failed, warm grey rests. State always ships with
-   an icon and a label too. */
+/* Two skies. Dark is deep space: blue-black, glass surfaces over a turning
+   star field, starlight text. Light is a star atlas: parchment, ink-navy
+   lines, the same glass. Colour still names a state and never alone: clay
+   works, amber waits for you, aurora green is done, red failed, slate rests.
+   Ion blue is the instrument colour: meters, dials, charts, focus. */
 :root {
   color-scheme: light;
-  --bg: #faf9f5;
-  --surface: #ffffff;
-  --fill: #f5f4ef;
-  --fill-2: #efede6;
-  --glass: rgba(250, 249, 245, 0.78);
-  --text: #141413;
-  --text-2: #5c5b56;
-  --text-3: #8d8b83;
-  --text-4: #b6b4ab;
-  --border: #ebe9e1;
-  --border-2: #dedcd2;
-  --shadow-sm: 0 1px 2px rgba(20, 20, 19, 0.04);
-  --shadow-md: 0 1px 2px rgba(20, 20, 19, 0.04), 0 8px 24px -10px rgba(20, 20, 19, 0.1);
-  --shadow-lg: 0 2px 6px rgba(20, 20, 19, 0.04), 0 28px 70px -24px rgba(20, 20, 19, 0.24);
-  --backdrop: rgba(20, 20, 19, 0.18);
-  --ambient: 0.32;
+  --bg: #f2eee4;
+  --surface: rgba(255, 253, 247, 0.7);
+  --surface-solid: #fbf9f3;
+  --surface-hi: rgba(255, 255, 255, 0.86);
+  --fill: rgba(28, 36, 72, 0.045);
+  --fill-2: rgba(28, 36, 72, 0.08);
+  --glass: rgba(246, 243, 235, 0.66);
+  --text: #161a2c;
+  --text-2: #4a4f67;
+  --text-3: #7e8298;
+  --text-4: #aeb0be;
+  --border: rgba(28, 36, 72, 0.1);
+  --border-2: rgba(28, 36, 72, 0.18);
+  --edge: rgba(255, 255, 255, 0.9);
+  --shadow-sm: 0 1px 2px rgba(22, 26, 44, 0.05);
+  --shadow-md: 0 1px 2px rgba(22, 26, 44, 0.05), 0 12px 30px -14px rgba(22, 26, 44, 0.18);
+  --shadow-lg: 0 2px 6px rgba(22, 26, 44, 0.05), 0 30px 80px -24px rgba(22, 26, 44, 0.3);
+  --backdrop: rgba(22, 26, 44, 0.2);
+  --ambient: 0.3;
+  --blur: blur(14px) saturate(1.3);
 
-  --clay: #d97757;
-  --clay-soft: #efa486;
-  --amber: #e0a12a;
-  --olive: #6f8a4c;
-  --red: #d2493f;
-  --sky: #6a9bcc;
-  --fig: #c46686;
+  --ion: #3a52c4;
+  --ion-2: #2b8bb5;
+  --clay: #cc6743;
+  --clay-soft: #e8956f;
+  --amber: #c98912;
+  --olive: #3f8a5c;
+  --red: #c93f34;
+  --sky: #3a52c4;
+  --fig: #b44d77;
 
-  --series-1: #d97757;
-  --series-2: #6a9bcc;
-  --series-3: #6f8a4c;
-  --series-4: #c46686;
-  --series-5: #c8a050;
-  --series-6: #8f8bbf;
-  --series-7: #8d8b83;
-  --series-8: #d2493f;
-  --chart-bar: #2f2e2b;
+  --series-1: #cc6743;
+  --series-2: #3a52c4;
+  --series-3: #3f8a5c;
+  --series-4: #b44d77;
+  --series-5: #b88a2a;
+  --series-6: #7a6fc0;
+  --series-7: #7e8298;
+  --series-8: #c93f34;
+  --chart-bar: #3a52c4;
 
   --tone-attention: var(--amber);
   --tone-active: var(--clay);
   --tone-good: var(--olive);
-  --tone-warning: #c98a24;
+  --tone-warning: #c27a10;
   --tone-critical: var(--red);
   --tone-idle: var(--text-3);
   --tone-muted: var(--text-4);
   --icon-ink: #ffffff;
 
+  /* The sky canvas reads these */
+  --sky-star: #1c2447;
+  --sky-line: #23336e;
+  --sky-star-a: 0.42;
+  --sky-line-a: 1.25;
+  --grid-line: rgba(35, 51, 110, 0.05);
+  --grid-major: rgba(35, 51, 110, 0.075);
+  --nebula: 0.32;
+  --nebula-blend: multiply;
+  --grain: 0.09;
+
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
-  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: 'Space Grotesk Variable', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --dur-fast: 150ms;
   --dur: 260ms;
   --dur-slow: 600ms;
-  --r-sm: 8px;
-  --r: 12px;
-  --r-lg: 16px;
-  --r-xl: 20px;
+  --r-sm: 7px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme='light'])) {
     color-scheme: dark;
-    --bg: #1a1918;
-    --surface: #232220;
-    --fill: #2a2926;
-    --fill-2: #32312e;
-    --glass: rgba(26, 25, 24, 0.78);
-    --text: #f5f4ef;
-    --text-2: #c2c0b6;
-    --text-3: #8f8d85;
-    --text-4: #64625c;
-    --border: #2f2e2b;
-    --border-2: #3d3c38;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.6);
-    --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.3), 0 30px 80px -20px rgba(0, 0, 0, 0.7);
-    --backdrop: rgba(0, 0, 0, 0.45);
-    --ambient: 0.22;
-    --clay: #e2876a;
-    --clay-soft: #f0a98c;
-    --amber: #f0b445;
-    --olive: #9cb879;
-    --red: #e8665c;
-    --series-1: #e2876a;
-    --series-2: #86b1dc;
-    --series-3: #9cb879;
-    --series-4: #d983a1;
-    --series-5: #dbb766;
-    --series-6: #aaa6d6;
-    --series-7: #a3a198;
-    --series-8: #e8665c;
-    --chart-bar: #d9d7ce;
-    --tone-warning: #e0a446;
-    --icon-ink: #1a1918;
+    --bg: #05060b;
+    --surface: rgba(15, 17, 29, 0.62);
+    --surface-solid: #0d0f1a;
+    --surface-hi: rgba(26, 29, 48, 0.78);
+    --fill: rgba(190, 205, 255, 0.05);
+    --fill-2: rgba(190, 205, 255, 0.09);
+    --glass: rgba(8, 10, 18, 0.58);
+    --text: #eceaf6;
+    --text-2: #b4b4cb;
+    --text-3: #7d7e9a;
+    --text-4: #4c4d66;
+    --border: rgba(165, 182, 255, 0.09);
+    --border-2: rgba(165, 182, 255, 0.17);
+    --edge: rgba(220, 228, 255, 0.1);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px -14px rgba(0, 0, 0, 0.8);
+    --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4), 0 34px 90px -20px rgba(0, 0, 0, 0.85);
+    --backdrop: rgba(2, 3, 8, 0.58);
+    --ambient: 0.4;
+    --ion: #8eaeff;
+    --ion-2: #86e3ff;
+    --clay: #f08c68;
+    --clay-soft: #f7b496;
+    --amber: #f5ba4c;
+    --olive: #8ad6a2;
+    --red: #f26d63;
+    --sky: #8eaeff;
+    --fig: #e384aa;
+    --series-1: #f08c68;
+    --series-2: #8eaeff;
+    --series-3: #8ad6a2;
+    --series-4: #e384aa;
+    --series-5: #e2c06e;
+    --series-6: #b3a8ff;
+    --series-7: #9a9bb6;
+    --series-8: #f26d63;
+    --chart-bar: #8eaeff;
+    --tone-warning: #eda94a;
+    --icon-ink: #0a0b14;
+    --sky-star: #eef1ff;
+    --sky-line: #93a8ff;
+    --sky-star-a: 1;
+    --sky-line-a: 1;
+    --grid-line: rgba(150, 170, 255, 0.035);
+    --grid-major: rgba(150, 170, 255, 0.06);
+    --nebula: 0.34;
+    --nebula-blend: screen;
+    --grain: 0.06;
   }
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1a1918;
-  --surface: #232220;
-  --fill: #2a2926;
-  --fill-2: #32312e;
-  --glass: rgba(26, 25, 24, 0.78);
-  --text: #f5f4ef;
-  --text-2: #c2c0b6;
-  --text-3: #8f8d85;
-  --text-4: #64625c;
-  --border: #2f2e2b;
-  --border-2: #3d3c38;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.3), 0 30px 80px -20px rgba(0, 0, 0, 0.7);
-  --backdrop: rgba(0, 0, 0, 0.45);
-  --ambient: 0.22;
-  --clay: #e2876a;
-  --clay-soft: #f0a98c;
-  --amber: #f0b445;
-  --olive: #9cb879;
-  --red: #e8665c;
-  --series-1: #e2876a;
-  --series-2: #86b1dc;
-  --series-3: #9cb879;
-  --series-4: #d983a1;
-  --series-5: #dbb766;
-  --series-6: #aaa6d6;
-  --series-7: #a3a198;
-  --series-8: #e8665c;
-  --chart-bar: #d9d7ce;
-  --tone-warning: #e0a446;
-  --icon-ink: #1a1918;
+  --bg: #05060b;
+  --surface: rgba(15, 17, 29, 0.62);
+  --surface-solid: #0d0f1a;
+  --surface-hi: rgba(26, 29, 48, 0.78);
+  --fill: rgba(190, 205, 255, 0.05);
+  --fill-2: rgba(190, 205, 255, 0.09);
+  --glass: rgba(8, 10, 18, 0.58);
+  --text: #eceaf6;
+  --text-2: #b4b4cb;
+  --text-3: #7d7e9a;
+  --text-4: #4c4d66;
+  --border: rgba(165, 182, 255, 0.09);
+  --border-2: rgba(165, 182, 255, 0.17);
+  --edge: rgba(220, 228, 255, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px -14px rgba(0, 0, 0, 0.8);
+  --shadow-lg: 0 2px 8px rgba(0, 0, 0, 0.4), 0 34px 90px -20px rgba(0, 0, 0, 0.85);
+  --backdrop: rgba(2, 3, 8, 0.58);
+  --ambient: 0.4;
+  --ion: #8eaeff;
+  --ion-2: #86e3ff;
+  --clay: #f08c68;
+  --clay-soft: #f7b496;
+  --amber: #f5ba4c;
+  --olive: #8ad6a2;
+  --red: #f26d63;
+  --sky: #8eaeff;
+  --fig: #e384aa;
+  --series-1: #f08c68;
+  --series-2: #8eaeff;
+  --series-3: #8ad6a2;
+  --series-4: #e384aa;
+  --series-5: #e2c06e;
+  --series-6: #b3a8ff;
+  --series-7: #9a9bb6;
+  --series-8: #f26d63;
+  --chart-bar: #8eaeff;
+  --tone-warning: #eda94a;
+  --icon-ink: #0a0b14;
+  --sky-star: #eef1ff;
+  --sky-line: #93a8ff;
+  --sky-star-a: 1;
+  --sky-line-a: 1;
+  --grid-line: rgba(150, 170, 255, 0.035);
+  --grid-major: rgba(150, 170, 255, 0.06);
+  --nebula: 0.34;
+  --nebula-blend: screen;
+  --grain: 0.06;
 }
 
 .tone-attention { --tone: var(--tone-attention); }
@@ -144,19 +194,19 @@
 .tone-idle { --tone: var(--tone-idle); }
 .tone-muted { --tone: var(--tone-muted); }
 
-/* The mood's three colours, animatable so the orb and the light around it
-   shift smoothly from one state to the next. */
-@property --m1 { syntax: '<color>'; inherits: true; initial-value: #d4d1c6; }
-@property --m2 { syntax: '<color>'; inherits: true; initial-value: #e6e3da; }
-@property --m3 { syntax: '<color>'; inherits: true; initial-value: #b9b5a8; }
-.mood-working { --m1: #d97757; --m2: #f6cdb0; --m3: #c25f86; }
+/* The mood's three colours, animatable so the orb, the nebulae and the light
+   around them shift smoothly from one state to the next. */
+@property --m1 { syntax: '<color>'; inherits: true; initial-value: #b9bfd6; }
+@property --m2 { syntax: '<color>'; inherits: true; initial-value: #e7e9f2; }
+@property --m3 { syntax: '<color>'; inherits: true; initial-value: #9aa3c4; }
+.mood-working { --m1: #e9774f; --m2: #f6cdb0; --m3: #c25f86; }
 .mood-attention { --m1: #f0aa2e; --m2: #fbe2a4; --m3: #e2683a; }
 .mood-error { --m1: #d6493f; --m2: #f5b2a4; --m3: #9e2e5a; }
-.mood-idle { --m1: #c9c4b6; --m2: #efede6; --m3: #a9b3c0; }
-.mood-offline { --m1: #dcd9cf; --m2: #efede7; --m3: #cfccc3; }
+.mood-idle { --m1: #8c9ad4; --m2: #dfe4f7; --m3: #6f7fbf; }
+.mood-offline { --m1: #c9ccd8; --m2: #eceef3; --m3: #b3b7c6; }
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme='light'])) .mood-idle { --m1: #6f6c64; --m2: #8e8b82; --m3: #4e4c46; }
-  :root:where(:not([data-theme='light'])) .mood-offline { --m1: #4a4844; --m2: #5a5853; --m3: #3c3a36; }
+  :root:where(:not([data-theme='light'])) .mood-idle { --m1: #5a6bb8; --m2: #a9b6ec; --m3: #3a3f86; }
+  :root:where(:not([data-theme='light'])) .mood-offline { --m1: #3d4160; --m2: #5b6082; --m3: #2a2d45; }
 }
-:root[data-theme='dark'] .mood-idle { --m1: #6f6c64; --m2: #8e8b82; --m3: #4e4c46; }
-:root[data-theme='dark'] .mood-offline { --m1: #4a4844; --m2: #5a5853; --m3: #3c3a36; }
+:root[data-theme='dark'] .mood-idle { --m1: #5a6bb8; --m2: #a9b6ec; --m3: #3a3f86; }
+:root[data-theme='dark'] .mood-offline { --m1: #3d4160; --m2: #5b6082; --m3: #2a2d45; }

@@ -5,6 +5,23 @@ import { animate, useReducedMotion } from 'motion/react'
 export const EASE = [0.22, 1, 0.36, 1] as const
 export const EASE_IN_OUT = [0.65, 0, 0.35, 1] as const
 
+// Surfaces that light up where the pointer is over them
+const SPOT = '.card, .stat, .panel, .figure, .dial-group, .grid-stats .fact'
+
+/** Tells the surface under the pointer where it is (--mx, --my), for its spotlight. */
+export const useSpotlight = () =>
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const el = (e.target as Element | null)?.closest?.<HTMLElement>(SPOT)
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      el.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`)
+      el.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`)
+    }
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [])
+
 /** Rises into focus; `i` staggers siblings, capped so long lists never wait. */
 export const rise = (i = 0, step = 0.045) => ({
   initial: { opacity: 0, y: 12, filter: 'blur(6px)' },

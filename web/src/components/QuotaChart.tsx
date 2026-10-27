@@ -134,6 +134,8 @@ export const QuotaChart = ({ samples, from, to }: { samples: QuotaSample[]; from
           <motion.path
             key={`${s.kind}:${to - from}`}
             d={path(s)}
+            className="line"
+            style={{ ['--c' as string]: s.color }}
             fill="none"
             stroke={s.color}
             strokeWidth={1.75}
@@ -152,7 +154,7 @@ export const QuotaChart = ({ samples, from, to }: { samples: QuotaSample[]; from
           <g pointerEvents="none">
             <line className="crosshair" x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + innerH} />
             {tip.map(({ s, v }) => (
-              <circle key={s.kind} cx={x(hover)} cy={y(v!)} r={4} fill={s.color} stroke="var(--surface-1)" strokeWidth={2} />
+              <circle key={s.kind} cx={x(hover)} cy={y(v!)} r={4} fill={s.color} stroke="var(--surface-solid)" strokeWidth={2} />
             ))}
           </g>
         )}

@@ -61,9 +61,12 @@ export const Masthead = ({
         </a>
 
         <nav className="tabs" aria-label="视图">
-          {TABS.map(t => (
+          {TABS.map((t, i) => (
             <a key={t.id} href={`#${t.id}`} className={tab === t.id ? 'tab on' : 'tab'} aria-current={tab === t.id ? 'page' : undefined}>
               {tab === t.id && <motion.span layoutId="tab-thumb" className="tab-thumb" transition={{ type: 'spring', stiffness: 460, damping: 38 }} />}
+              <span className="tab-idx" aria-hidden>
+                {String(i + 1).padStart(2, '0')}
+              </span>
               <span className="tab-label">{t.label}</span>
               {t.id === 'live' && waiting > 0 && (
                 <motion.span className="badge" key={waiting} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 600, damping: 16 }}>

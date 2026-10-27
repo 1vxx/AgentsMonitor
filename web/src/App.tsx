@@ -5,9 +5,10 @@ import { useNow } from './format.ts'
 import { TABS, applyTheme, isMac, nextTheme, readTheme, tabFromHash, type Tab, type Theme } from './nav.ts'
 import { useLive } from './store.ts'
 import { CommandPalette } from './components/CommandPalette.tsx'
+import { Cosmos } from './components/Cosmos.tsx'
 import { Masthead } from './components/Masthead.tsx'
-import { EASE } from './components/motion.tsx'
-import { Overview, QuotaStrip } from './components/Overview.tsx'
+import { EASE, useSpotlight } from './components/motion.tsx'
+import { Overview } from './components/Overview.tsx'
 import { SessionDrawer } from './components/SessionDrawer.tsx'
 import { ActivityView } from './views/ActivityView.tsx'
 import { DaemonView } from './views/DaemonView.tsx'
@@ -25,6 +26,8 @@ export const App = () => {
   const [theme, setTheme] = useState<Theme>(readTheme)
   const now = useNow()
   const waiting = useLive(s => s.summary?.counts.waiting ?? 0)
+  const mood = useLive(s => s.summary?.mood ?? 'offline')
+  useSpotlight()
 
   useEffect(() => {
     const onHash = () => setTab(tabFromHash())
@@ -83,6 +86,7 @@ export const App = () => {
 
   return (
     <MotionConfig reducedMotion="user">
+      <Cosmos mood={mood} sector={TABS.findIndex(t => t.id === tab)} />
       <div className="app">
         <Masthead
           tab={tab}
@@ -105,8 +109,7 @@ export const App = () => {
             >
               {tab === 'live' && (
                 <>
-                  <Overview now={now} />
-                  <QuotaStrip now={now} />
+                  <Overview now={now} onOpen={onOpen} />
                   <LiveView now={now} onOpen={onOpen} />
                 </>
               )}
@@ -124,7 +127,11 @@ export const App = () => {
         </main>
 
         <footer className="footer">
-          <span>AgentsMonitor · 数据只保存在这台电脑上</span>
+          <span className="footer-mark">AgentsMonitor</span>
+          <span>数据只保存在这台电脑上</span>
+          <span className="footer-math" aria-hidden>
+            T² ∝ a³ · ∮ dt
+          </span>
           <span className="footer-keys">
             <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd> 搜索 <kbd>1</kbd>–<kbd>5</kbd> 切换视图 <kbd>esc</kbd> 关闭
           </span>

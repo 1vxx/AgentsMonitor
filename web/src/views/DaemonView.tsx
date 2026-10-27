@@ -106,6 +106,9 @@ export const DaemonView = () => {
     <div className="daemon-view">
       <motion.div className="section-head" {...rise(0)}>
         <div className="section-lead">
+          <span className="kicker">
+            <b>01</b> Daemon
+          </span>
           <h2 className="section-title">守护进程</h2>
         </div>
         <span className="section-meta">
@@ -135,7 +138,12 @@ export const DaemonView = () => {
       )}
       {stats?.retention && (
         <motion.section className="panel retention" {...rise(6)}>
-          <h3 className="section-title section-title-sm">数据保留</h3>
+          <div className="section-lead">
+            <span className="kicker">
+              <b>02</b> Retention
+            </span>
+            <h3 className="section-title section-title-sm">数据保留</h3>
+          </div>
           <ul>
             <li>
               已结束的会话及其事件保留 {stats.retention.sessions_days} 天

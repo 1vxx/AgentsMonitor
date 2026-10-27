@@ -116,6 +116,9 @@ export const TokensPanel = ({ now }: { now: number }) => {
     <motion.section className="usage" {...rise(0)}>
       <div className="section-head">
         <div className="section-lead">
+          <span className="kicker">
+            <b>01</b> Σ usage
+          </span>
           <h2 className="section-title">Tokens</h2>
         </div>
         <Seg label="时间范围" value={rangeId} onChange={setRangeId} options={RANGES} />

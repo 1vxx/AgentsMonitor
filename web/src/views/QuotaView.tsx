@@ -5,7 +5,8 @@ import { api } from '../api.ts'
 import { dateTime, pct, until } from '../format.ts'
 import { useLive } from '../store.ts'
 import type { QuotaSample } from '../types.ts'
-import { AgentBadge, Empty, Meter, Seg } from '../components/bits.tsx'
+import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
+import { Dial } from '../components/Dial.tsx'
 import { rise } from '../components/motion.tsx'
 import { QuotaChart } from '../components/QuotaChart.tsx'
 
@@ -47,6 +48,9 @@ export const QuotaView = ({ now }: { now: number }) => {
     <div className="quota-view">
       <motion.div className="section-head" {...rise(1)}>
         <div className="section-lead">
+          <span className="kicker">
+            <b>02</b> Rate limits
+          </span>
           <h2 className="section-title">额度</h2>
         </div>
         <div className="toolbar">
@@ -66,9 +70,9 @@ export const QuotaView = ({ now }: { now: number }) => {
               {q && <span className="muted small">更新于 {dateTime(q.updated_at)}</span>}
             </div>
             {q && (
-              <div className="quota-windows quota-windows-wide">
+              <div className="dials dials-wide">
                 {q.windows.map(w => (
-                  <Meter key={w.kind} value={w.percent_used} label={windowLabel(w.kind)} detail={until(w.resets_at, now)} />
+                  <Dial key={w.kind} value={w.percent_used} label={windowLabel(w.kind)} detail={until(w.resets_at, now)} />
                 ))}
               </div>
             )}

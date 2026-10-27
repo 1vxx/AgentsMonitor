@@ -1,7 +1,7 @@
 /* ---------- Page ---------- */
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; background: var(--bg); }
 body {
   min-height: 100vh;
   background: var(--bg);
@@ -12,12 +12,28 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
-::selection { background: color-mix(in srgb, var(--clay) 24%, transparent); }
+::selection { background: color-mix(in srgb, var(--ion) 30%, transparent); }
 button, input { font: inherit; color: inherit; letter-spacing: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 a { color: inherit; }
-:focus-visible { outline: 2px solid color-mix(in srgb, var(--clay) 70%, transparent); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid color-mix(in srgb, var(--ion) 75%, transparent); outline-offset: 2px; border-radius: 6px; }
 * { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+
+/* Registration marks at the four corners of an instrument panel, as on a
+   technical drawing; layered over a surface's own background. */
+:root {
+  --hud-c: color-mix(in srgb, var(--ion) 50%, transparent);
+  --hud-marks:
+    linear-gradient(var(--hud-c), var(--hud-c)) left 8px top 8px / 9px 1px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) left 8px top 8px / 1px 9px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) right 8px top 8px / 9px 1px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) right 8px top 8px / 1px 9px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) left 8px bottom 8px / 9px 1px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) left 8px bottom 8px / 1px 9px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) right 8px bottom 8px / 9px 1px no-repeat,
+    linear-gradient(var(--hud-c), var(--hud-c)) right 8px bottom 8px / 1px 9px no-repeat;
+  --glass-ring: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--border);
+}
 
 code, .mono { font-family: var(--mono); font-size: 0.88em; letter-spacing: 0; }
 .muted { color: var(--text-3); }
@@ -25,6 +41,21 @@ code, .mono { font-family: var(--mono); font-size: 0.88em; letter-spacing: 0; }
 .strong { font-weight: 600; }
 .nowrap { white-space: nowrap; }
 .label { font-size: 12.5px; font-weight: 500; color: var(--text-3); letter-spacing: 0; }
+
+/* A small mono caption above a title: an index in ion, then a name */
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.kicker b { font-weight: 600; color: var(--ion); }
+.kicker b::after { content: ''; display: inline-block; width: 18px; height: 1px; margin-left: 8px; vertical-align: middle; background: color-mix(in srgb, var(--ion) 55%, transparent); }
+
 kbd {
   display: inline-grid;
   place-items: center;
@@ -34,7 +65,7 @@ kbd {
   border-radius: 6px;
   background: var(--fill);
   box-shadow: inset 0 0 0 1px var(--border), 0 1px 0 var(--border);
-  font: 500 11px/1 var(--font);
+  font: 500 10.5px/1 var(--mono);
   color: var(--text-3);
 }
 
@@ -49,20 +80,20 @@ kbd {
   border-radius: 999px;
   border: 0;
   background: var(--fill);
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--border-2);
   color: var(--text);
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast), box-shadow var(--dur), transform var(--dur-fast) var(--ease-out);
 }
 .btn:hover { background: var(--fill-2); }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; cursor: default; transform: none; }
 .btn-primary { background: var(--text); color: var(--bg); box-shadow: none; }
-.btn-primary:hover { background: color-mix(in srgb, var(--text) 85%, var(--bg)); }
-.btn-danger { background: transparent; color: var(--red); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent); }
-.btn-danger:hover { background: color-mix(in srgb, var(--red) 8%, transparent); }
+.btn-primary:hover { background: var(--text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ion) 22%, transparent), 0 0 28px -4px color-mix(in srgb, var(--ion) 70%, transparent); }
+.btn-danger { background: transparent; color: var(--red); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 38%, transparent); }
+.btn-danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 55%, transparent), 0 0 24px -6px var(--red); }
 .link-btn {
   align-self: center;
   height: 34px;
@@ -90,7 +121,7 @@ kbd {
   cursor: pointer;
   transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
-.icon-btn:hover { background: var(--fill); color: var(--text); }
+.icon-btn:hover { background: var(--fill-2); color: var(--text); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn svg { width: 17px; height: 17px; }
 
@@ -104,23 +135,27 @@ kbd {
   padding: 0 14px;
   border-radius: 999px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--glass-ring);
   color: var(--text-3);
   transition: box-shadow var(--dur);
 }
-.field:focus-within { box-shadow: inset 0 0 0 1px var(--border-2), 0 0 0 4px color-mix(in srgb, var(--clay) 14%, transparent); color: var(--text); }
+.field:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ion) 50%, transparent), 0 0 0 4px color-mix(in srgb, var(--ion) 14%, transparent), 0 0 30px -8px var(--ion); color: var(--text); }
 .field svg { width: 15px; height: 15px; flex: none; }
 .field input { flex: 1; min-width: 0; border: 0; background: none; outline: none; padding: 0; font-size: 13.5px; color: var(--text); }
 .field input::placeholder { color: var(--text-4); }
 
-/* Choices on a soft track, with a white thumb that glides to the chosen one */
+/* Choices on a glass track, with a lit thumb that glides to the chosen one */
 .seg {
   position: relative;
   display: inline-flex;
   padding: 3px;
   border-radius: 999px;
-  background: var(--fill);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--glass-ring);
 }
 .seg button {
   position: relative;
@@ -137,7 +172,13 @@ kbd {
   transition: color var(--dur);
 }
 .seg button:hover, .seg button.on { color: var(--text); }
-.seg-ink { position: absolute; inset: 0; border-radius: 999px; background: var(--surface); box-shadow: 0 1px 2px rgba(20, 20, 19, 0.08), 0 0 0 1px var(--border); }
+.seg-ink {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--surface-hi);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ion) 35%, transparent), 0 0 18px -6px color-mix(in srgb, var(--ion) 80%, transparent);
+}
 .seg-label { position: relative; }
 .seg-sm button { height: 24px; padding: 0 11px; font-size: 12px; }
 
@@ -148,12 +189,15 @@ kbd {
   align-items: baseline;
   padding: 12px 16px;
   border-radius: var(--r);
-  background: color-mix(in srgb, var(--red) 7%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 22%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, var(--surface));
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 28%, transparent);
   font-size: 13.5px;
   color: var(--text-2);
 }
 .empty {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -162,10 +206,23 @@ kbd {
   text-align: center;
   color: var(--text-2);
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--hud-marks), var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--glass-ring);
+  overflow: hidden;
 }
-.empty .orb { margin-bottom: 14px; }
+/* The small orb gets an orbit of its own */
+.empty .orb { margin-bottom: 18px; }
+.empty .orb::before, .empty .orb::after {
+  content: '';
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--ion) 40%, transparent);
+  animation: spin 40s linear infinite;
+}
+.empty .orb::after { inset: -30px; border: 1px solid color-mix(in srgb, var(--ion) 16%, transparent); animation: none; }
 .empty-title { font: 600 18px/1.35 var(--font-display); letter-spacing: -0.015em; color: var(--text); }
 .empty-body { max-width: 560px; font-size: 13.5px; line-height: 1.75; color: var(--text-2); }
 .empty code {
@@ -193,16 +250,18 @@ kbd {
   padding: 0 10px 0 8px;
   border-radius: 999px;
   background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text);
   font-size: 12.5px;
   font-weight: 500;
   white-space: nowrap;
 }
-.pill.tone-attention { background: color-mix(in srgb, var(--amber) 16%, var(--surface)); }
-.pill.tone-critical { background: color-mix(in srgb, var(--red) 11%, var(--surface)); }
+.pill.tone-active { background: color-mix(in srgb, var(--clay) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--clay) 28%, transparent); }
+.pill.tone-attention { background: color-mix(in srgb, var(--amber) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 40%, transparent), 0 0 16px -6px var(--amber); }
+.pill.tone-critical { background: color-mix(in srgb, var(--red) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 32%, transparent); }
 .pill .ic { color: var(--tone); }
 .pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pill-time { color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+.pill-time { color: var(--text-3); font: 400 11.5px var(--mono); }
 .ic { width: 13px; height: 13px; flex: none; display: inline-block; }
 .ic-dot { width: 7px; height: 7px; margin: 0 3px; border-radius: 50%; background: var(--tone); }
 .ic-spin {
@@ -213,6 +272,7 @@ kbd {
 }
 .ic-pulse { position: relative; }
 .ic-pulse::before, .ic-pulse::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--tone); }
+.ic-pulse::before { box-shadow: 0 0 8px var(--tone); }
 .ic-pulse::after { animation: ping 1.6s var(--ease-out) infinite; }
 
 .agent { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
@@ -223,11 +283,11 @@ kbd {
   height: 30px;
   flex: none;
   border-radius: 9px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font: 700 10.5px/1 var(--mono);
+  letter-spacing: 0.04em;
   color: var(--agent);
-  background: color-mix(in srgb, var(--agent) 12%, var(--surface));
+  background: color-mix(in srgb, var(--agent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent) 28%, transparent);
 }
 .agent-name { font-size: 14px; font-weight: 500; }
 .chip {
@@ -237,34 +297,63 @@ kbd {
   padding: 0 8px;
   border-radius: 6px;
   background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text-2);
-  font-size: 11.5px;
-  font-weight: 500;
+  font: 500 11px var(--mono);
   white-space: nowrap;
 }
-.chip-warn { background: color-mix(in srgb, var(--tone-warning) 15%, var(--surface)); color: var(--tone-warning); }
-.tag { font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 6px; color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); }
+.chip-warn { background: color-mix(in srgb, var(--tone-warning) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone-warning) 32%, transparent); color: var(--tone-warning); }
+.tag { font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 6px; color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent); }
 code.tool {
   font-size: 11.5px;
   padding: 2px 7px;
   border-radius: 6px;
-  background: var(--fill);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: color-mix(in srgb, var(--ion) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ion) 24%, transparent);
   color: var(--text);
   white-space: nowrap;
 }
 
-/* ---------- Meter ---------- */
+/* ---------- Meter: a graduated scale with a beam of light ---------- */
 .meter { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .meter-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .meter-label { color: var(--text-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meter-value { font: 600 15px/1 var(--font-display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .meter-sm .meter-value { font-size: 12.5px; }
-.meter-track { position: relative; height: 6px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+.meter-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), color-mix(in srgb, var(--text) 16%, transparent) calc(10% - 1px) 10%),
+    var(--fill-2);
+}
 .meter-sm .meter-track { height: 4px; }
-.meter-fill { height: 100%; border-radius: 999px; background: var(--text); }
-.meter-fill.tone-warning, .meter-fill.tone-critical { background: var(--tone); }
-.meter-fill.tone-muted { background: transparent; }
+.meter-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ion) 30%, transparent), var(--ion) 70%, var(--ion-2));
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--ion) 70%, transparent);
+}
+.meter-fill::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px 2px var(--ion-2);
+  opacity: 0.85;
+}
+.meter-sm .meter-fill::after { width: 4px; height: 4px; margin-top: -2px; }
+.meter-fill.tone-warning, .meter-fill.tone-critical { background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 30%, transparent), var(--tone)); box-shadow: 0 0 12px -2px var(--tone); }
+.meter-fill.tone-warning::after, .meter-fill.tone-critical::after { box-shadow: 0 0 8px 2px var(--tone); }
+.meter-fill.tone-muted { background: transparent; box-shadow: none; }
+.meter-fill.tone-muted::after { display: none; }
 .meter-detail { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; min-height: 18px; }
 
 /* ---------- Tooltip ---------- */
@@ -275,15 +364,32 @@ code.tool {
   min-width: 176px;
   padding: 10px 12px;
   border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: var(--shadow-lg), inset 0 0 0 1px var(--border);
+  background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-lg), inset 0 0 0 1px var(--border-2);
   font-size: 12.5px;
   transition: left 120ms var(--ease-out), top 120ms var(--ease-out);
 }
-.tooltip-title { margin-bottom: 6px; color: var(--text-3); font-size: 12px; }
+.tooltip-title { margin-bottom: 6px; color: var(--text-3); font: 11px var(--mono); letter-spacing: 0.04em; }
 .tooltip-row { display: flex; align-items: center; gap: 8px; line-height: 1.75; color: var(--text-2); }
-.tooltip-row strong { margin-left: auto; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tooltip-row strong { margin-left: auto; font: 600 12.5px var(--mono); color: var(--text); }
+.swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px currentColor; }
+
+/* ---------- Spotlight: a soft light where the pointer is, under the content ---------- */
+.card, .stat, .panel, .figure, .dial-group, .grid-stats .fact { position: relative; isolation: isolate; }
+.card::after, .stat::after, .panel::after, .figure::after, .dial-group::after, .grid-stats .fact::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--ion) 11%, transparent), transparent 65%);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+}
+.card:hover::after, .stat:hover::after, .panel:hover::after, .figure:hover::after, .dial-group:hover::after, .grid-stats .fact:hover::after { opacity: 1; }
 
 /* ---------- Motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -292,6 +398,7 @@ code.tool {
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @keyframes grow { from { transform: scaleY(0); } }
 @keyframes row-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes fade-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

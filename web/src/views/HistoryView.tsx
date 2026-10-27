@@ -74,6 +74,9 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
     <div className="history">
       <motion.div className="section-head" {...rise(0)}>
         <div className="section-lead">
+          <span className="kicker">
+            <b>01</b> Archive
+          </span>
           <h2 className="section-title">
             全部会话 {!first && <Numeral className="count" value={shown.length} />}
           </h2>

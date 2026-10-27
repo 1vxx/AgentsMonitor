@@ -1,4 +1,6 @@
+@import '@fontsource-variable/space-grotesk/wght.css';
 @import './tokens.css';
+@import './cosmos.css';
 @import './base.css';
 @import './chrome.css';
 @import './live.css';

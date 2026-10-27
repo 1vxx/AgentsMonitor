@@ -38,6 +38,9 @@ export const ActivityView = ({ onOpen }: { onOpen: (key: string) => void }) => {
     <div className="activity-view">
       <motion.div className="section-head" {...rise(0)}>
         <div className="section-lead">
+          <span className="kicker">
+            <b>01</b> Event stream
+          </span>
           <h2 className="section-title">事件流</h2>
         </div>
         <Seg label="按类型筛选" value={group} onChange={setGroup} options={GROUPS} />

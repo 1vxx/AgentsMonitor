@@ -40,7 +40,12 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
   return (
     <motion.aside className="live-feed" aria-label="实时动态" {...rise(3)}>
       <div className="feed-head">
-        <h2 className="section-title section-title-sm">实时动态</h2>
+        <div className="section-lead">
+          <span className="kicker">
+            <b>03</b> Telemetry
+          </span>
+          <h2 className="section-title section-title-sm">实时动态</h2>
+        </div>
         <span className="label feed-live">
           <span className="live-dot conn-open" aria-hidden />
           实时
@@ -102,9 +107,14 @@ export const LiveView = ({ now, onOpen }: { now: number; onOpen: (key: string) =
     <div className="live">
       <div className="live-main">
         <motion.div className="section-head" {...rise(2)}>
-          <h2 className="section-title">
-            活动会话 <Numeral className="count" value={live.length} />
-          </h2>
+          <div className="section-lead">
+            <span className="kicker">
+              <b>02</b> Sessions in orbit
+            </span>
+            <h2 className="section-title">
+              活动会话 <Numeral className="count" value={live.length} />
+            </h2>
+          </div>
           <AgentFilter agents={agents} value={agent} onChange={setAgent} />
         </motion.div>
         {live.length === 0 ? (
