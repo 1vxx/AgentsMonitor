@@ -64,7 +64,7 @@ export const describe = (r: EventRecord): Described => {
       const kind = str(r.kind)
       const what = kind === 'permission' ? '等待授权' : kind === 'input' ? '等待回答' : '等待输入'
       const tool = str(r.tool)
-      return { kind: '需要你', text: tool ? `${what} · ${shortTool(tool)}` : what, detail: str(r.subject) ?? str(r.message), tone: 'warning' }
+      return { kind: '需要你', text: tool ? `${what} · ${shortTool(tool)}` : what, detail: str(r.subject) ?? str(r.message), tone: 'attention' }
     }
     case 'attention.clear':
       return { kind: '需要你', text: '已处理', tone: 'idle' }

@@ -1,9 +1,12 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
+import { motion } from 'motion/react'
 import { agentInfo } from '../agents.ts'
 import { duration, pct } from '../format.ts'
 import type { Session } from '../types.ts'
+import { EASE, Numeral } from './motion.tsx'
+import { Orb } from './Orb.tsx'
 
-export type Tone = 'warning' | 'critical' | 'active' | 'idle' | 'muted' | 'good'
+export type Tone = 'attention' | 'warning' | 'critical' | 'active' | 'idle' | 'muted' | 'good'
 export type IconName = 'alert' | 'ask' | 'spin' | 'pulse' | 'dot' | 'x' | 'stop' | 'stale' | 'pause'
 
 export interface StatusView {
@@ -20,9 +23,9 @@ export const statusView = (s: StatusFacts): StatusView => {
   if (s.stale) return { label: '无信号', tone: 'muted', icon: 'stale' }
   switch (s.status) {
     case 'waiting_permission':
-      return { label: '等待授权', tone: 'warning', icon: 'alert' }
+      return { label: '等待授权', tone: 'attention', icon: 'alert' }
     case 'waiting_input':
-      return { label: '等待回答', tone: 'warning', icon: 'ask' }
+      return { label: '等待回答', tone: 'attention', icon: 'ask' }
     case 'tool': {
       const tool = s.tools?.at(-1)?.tool
       return { label: tool ? `执行 ${shortTool(tool)}` : '执行工具', tone: 'active', icon: 'spin' }
@@ -88,7 +91,9 @@ export const Icon = ({ name }: { name: IconName }) => {
 export const StatusPill = ({ view, since, now }: { view: StatusView; since?: number; now?: number }) => (
   <span className={`pill tone-${view.tone}`}>
     <Icon name={view.icon} />
-    <span>{view.label}</span>
+    <span className="pill-label" title={view.label}>
+      {view.label}
+    </span>
     {since !== undefined && now !== undefined && <span className="pill-time">{duration(now - since)}</span>}
   </span>
 )
@@ -98,7 +103,7 @@ export const AgentBadge = ({ agent, full }: { agent: string; full?: boolean }) =
   return (
     <span className="agent" title={info.label} style={{ ['--agent' as string]: info.color }}>
       <span className="agent-mark">{info.short}</span>
-      {full && <span>{info.label}</span>}
+      {full && <span className="agent-name">{info.label}</span>}
     </span>
   )
 }
@@ -114,7 +119,7 @@ export const Meter = ({ value, label, detail, size = 'md' }: { value?: number; l
       {(label || detail) && (
         <div className="meter-head">
           <span className="meter-label">{label}</span>
-          <span className="meter-value">{pct(value)}</span>
+          <span className="meter-value">{value === undefined ? pct(value) : <Numeral value={value} format={pct} />}</span>
         </div>
       )}
       <div
@@ -125,16 +130,56 @@ export const Meter = ({ value, label, detail, size = 'md' }: { value?: number; l
         aria-valuenow={value === undefined ? undefined : Math.round(v)}
         aria-label={typeof label === 'string' ? label : undefined}
       >
-        <div className={`meter-fill tone-${tone}`} style={{ width: `${v}%` }} />
+        <motion.div
+          className={`meter-fill tone-${tone}`}
+          initial={{ width: 0 }}
+          animate={{ width: `${v}%` }}
+          transition={{ duration: 1.1, ease: EASE }}
+        />
       </div>
       {detail && <div className="meter-detail">{detail}</div>}
     </div>
   )
 }
 
+/** Choices with a thumb that glides to the chosen one. */
+export const Seg = <T extends string | number>({
+  options,
+  value,
+  onChange,
+  label,
+  size,
+}: {
+  options: readonly { id: T; label: ReactNode }[]
+  value: T
+  onChange: (v: T) => void
+  label: string
+  size?: 'sm'
+}) => {
+  const id = useId()
+  return (
+    <div className={`seg${size ? ` seg-${size}` : ''}`} role="group" aria-label={label}>
+      {options.map(o => (
+        <button key={o.id} className={value === o.id ? 'on' : ''} aria-pressed={value === o.id} onClick={() => onChange(o.id)}>
+          {value === o.id && <motion.span layoutId={`seg${id}`} className="seg-ink" transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
+          <span className="seg-label">{o.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export const Empty = ({ title, children }: { title: string; children?: ReactNode }) => (
-  <div className="empty">
+  <motion.div className="empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: EASE }}>
+    <Orb mood="idle" size={56} />
     <div className="empty-title">{title}</div>
     {children && <div className="empty-body">{children}</div>}
-  </div>
+  </motion.div>
+)
+
+export const SearchIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>
+    <circle cx="7" cy="7" r="4.6" />
+    <path d="m10.5 10.5 3.5 3.5" />
+  </svg>
 )

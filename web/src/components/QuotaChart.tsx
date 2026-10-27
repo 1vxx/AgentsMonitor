@@ -1,7 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'motion/react'
 import { windowLabel } from '../agents.ts'
 import { dateTime, pct } from '../format.ts'
 import type { QuotaSample } from '../types.ts'
+import { EASE_IN_OUT } from './motion.tsx'
 
 // A step line per rate-limit window: a reading holds until the next one.
 // One y-axis (percent used, 0-100), a crosshair with every window's value at
@@ -127,8 +129,19 @@ export const QuotaChart = ({ samples, from, to }: { samples: QuotaSample[]; from
             {dateTime(t)}
           </text>
         ))}
-        {series.map(s => (
-          <path key={s.kind} d={path(s)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" />
+        {/* Each line is drawn like a stroke of the brush when the range changes */}
+        {series.map((s, i) => (
+          <motion.path
+            key={`${s.kind}:${to - from}`}
+            d={path(s)}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={1.75}
+            strokeLinejoin="round"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 1.4, ease: EASE_IN_OUT, delay: i * 0.12 }}
+          />
         ))}
         {labels.map(({ s, v, yy }) => (
           <text key={s.kind} className="end-label" x={PAD.left + innerW + 8} y={yy} dy="0.32em">

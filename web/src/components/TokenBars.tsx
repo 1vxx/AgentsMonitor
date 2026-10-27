@@ -78,37 +78,40 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
             </text>
           </g>
         ))}
-        {buckets.map((b, i) => {
-          const v = value(b.totals, measure)
-          const x = PAD.left + i * slot + (slot - barW) / 2
-          const bh = Math.max(0, PAD.top + innerH - y(v))
-          const r = Math.min(3, barW / 2, bh)
-          return (
-            <g key={b.t}>
-              {v > 0 && (
-                <path
-                  d={`M${x},${PAD.top + innerH}V${PAD.top + innerH - bh + r}q0,-${r} ${r},-${r}H${x + barW - r}q${r},0 ${r},${r}V${PAD.top + innerH}Z`}
-                  fill="var(--series-1)"
-                  opacity={hover === undefined || hover === i ? 1 : 0.55}
+        {/* Keyed by what is shown, so the bars grow again when it changes */}
+        <g key={`${measure}:${series.since}:${series.bucket_ms}`}>
+          {buckets.map((b, i) => {
+            const v = value(b.totals, measure)
+            const x = PAD.left + i * slot + (slot - barW) / 2
+            const bh = Math.max(0, PAD.top + innerH - y(v))
+            const r = Math.min(3, barW / 2, bh)
+            return (
+              <g key={b.t}>
+                {v > 0 && (
+                  <path
+                    className={`bar${hover === i ? ' bar-on' : ''}${hover !== undefined && hover !== i ? ' bar-dim' : ''}`}
+                    style={{ ['--i' as string]: Math.min(i, 60) }}
+                    d={`M${x},${PAD.top + innerH}V${PAD.top + innerH - bh + r}q0,-${r} ${r},-${r}H${x + barW - r}q${r},0 ${r},${r}V${PAD.top + innerH}Z`}
+                  />
+                )}
+                {i % labelEvery === 0 && (
+                  <text className="tick" x={x + barW / 2} y={HEIGHT - 8} textAnchor="middle">
+                    {bucketLabel(b.t, series.bucket_ms)}
+                  </text>
+                )}
+                <rect
+                  x={PAD.left + i * slot}
+                  y={PAD.top}
+                  width={slot}
+                  height={innerH}
+                  fill="transparent"
+                  onPointerEnter={() => setHover(i)}
+                  onPointerLeave={() => setHover(undefined)}
                 />
-              )}
-              {i % labelEvery === 0 && (
-                <text className="tick" x={x + barW / 2} y={HEIGHT - 8} textAnchor="middle">
-                  {bucketLabel(b.t, series.bucket_ms)}
-                </text>
-              )}
-              <rect
-                x={PAD.left + i * slot}
-                y={PAD.top}
-                width={slot}
-                height={innerH}
-                fill="transparent"
-                onPointerEnter={() => setHover(i)}
-                onPointerLeave={() => setHover(undefined)}
-              />
-            </g>
-          )
-        })}
+              </g>
+            )
+          })}
+        </g>
       </svg>
       {h && hover !== undefined && (
         <div
