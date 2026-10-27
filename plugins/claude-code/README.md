@@ -23,6 +23,8 @@ claude plugin marketplace add /path/to/AgentsMonitor
 claude plugin install agentsmon@agentsmon
 ```
 
+To switch it off and on again, use `/plugin`, or `claude plugin disable agentsmon@agentsmon` and `claude plugin enable agentsmon@agentsmon`; sessions started afterwards follow.
+
 To try it without installing, start a session with `claude --plugin-dir /path/to/AgentsMonitor/plugins/claude-code`.
 
 ## Options

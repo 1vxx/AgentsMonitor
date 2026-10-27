@@ -67,7 +67,9 @@ claude plugin marketplace add /path/to/AgentsMonitor
 claude plugin install agentsmon@agentsmon
 ```
 
-To try it without installing, load it for a single session with `claude --plugin-dir /path/to/AgentsMonitor/plugins/claude-code`. To load it in every session, including Claude Desktop ones, add `CLAUDE_CODE_PLUGIN_DIRS` with that path to the `env` block of `~/.claude/settings.json`.
+Installed this way it loads in every session, Claude Desktop ones included, and can be switched off and on again like any other plugin: in `/plugin`, or with `claude plugin disable agentsmon@agentsmon` and `claude plugin enable agentsmon@agentsmon`. The change applies to sessions started afterwards. A local marketplace is read straight from this folder, so edits to the plugin need no reinstall.
+
+To try it without installing, load it for a single session with `claude --plugin-dir /path/to/AgentsMonitor/plugins/claude-code`. Avoid loading it through `CLAUDE_CODE_PLUGIN_DIRS` as well as installing it: each session would then report everything twice.
 
 Plugin options:
 
