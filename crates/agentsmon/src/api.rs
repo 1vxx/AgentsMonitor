@@ -301,6 +301,8 @@ struct TokensQuery {
     /// `agent`, `model`, `source` or `session`.
     group: Option<String>,
     bucket_ms: Option<i64>,
+    /// Only this agent's requests (`claude-code`, `codex`, ...).
+    agent: Option<String>,
 }
 
 impl TokensQuery {
@@ -319,7 +321,8 @@ async fn tokens(State(api): State<Api>, Query(q): Query<TokensQuery>) -> Respons
     };
     let hub = api.hub.clone();
     let read = tokio::task::spawn_blocking(move || {
-        hub.store().read(|c| Ok((store::token_report(c, since, until, group)?, store::last_usage_ts(c)?)))
+        let agent = q.agent.as_deref().filter(|a| !a.is_empty());
+        hub.store().read(|c| Ok((store::token_report(c, since, until, group, agent)?, store::last_usage_ts(c, agent)?)))
     })
     .await;
     match read {
@@ -334,7 +337,11 @@ async fn token_series(State(api): State<Api>, Query(q): Query<TokensQuery>) -> R
     // At most 2000 buckets, none shorter than a minute.
     let bucket = q.bucket_ms.unwrap_or(3_600_000).max(60_000).max((until - since) / 2000);
     let hub = api.hub.clone();
-    match tokio::task::spawn_blocking(move || hub.store().read(|c| store::token_series(c, since, until, bucket))).await {
+    let read = move || {
+        let agent = q.agent.as_deref().filter(|a| !a.is_empty());
+        hub.store().read(|c| store::token_series(c, since, until, bucket, agent))
+    };
+    match tokio::task::spawn_blocking(read).await {
         Ok(Ok(points)) => Json(TokenSeries { since, bucket_ms: bucket, points }).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e),

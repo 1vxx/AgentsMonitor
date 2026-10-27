@@ -462,22 +462,25 @@ fn totals_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(String, TokenTotals)> 
     ))
 }
 
-/// Token totals over `[since, until)`, grouped when asked; groups sorted by
-/// their total, largest first.
+/// Token totals over `[since, until)`, of one agent or all, grouped when
+/// asked; groups sorted by their total, largest first.
 pub fn token_report(
     c: &Connection,
     since: i64,
     until: i64,
     group: Option<TokenGroupBy>,
+    agent: Option<&str>,
 ) -> rusqlite::Result<(TokenTotals, Vec<TokenGroup>)> {
     let (detail, summed) = TokenGroupBy::columns(group);
     let sums = "SUM(input), SUM(output), SUM(cache_read), SUM(cache_write)";
     let mut by: HashMap<String, TokenTotals> = HashMap::new();
     for (i, (table, time, requests)) in TOKEN_TIERS.iter().enumerate() {
         let key = if i == 0 { detail } else { summed };
-        let sql = format!("SELECT {key}, {sums}, {requests} FROM {table} WHERE {time} >= ?1 AND {time} < ?2 GROUP BY 1");
+        let sql = format!(
+            "SELECT {key}, {sums}, {requests} FROM {table} WHERE {time} >= ?1 AND {time} < ?2 AND (?3 IS NULL OR agent = ?3) GROUP BY 1"
+        );
         let mut stmt = c.prepare_cached(&sql)?;
-        for row in stmt.query_map([since, until], totals_row)? {
+        for row in stmt.query_map(params![since, until, agent], totals_row)? {
             let (key, t) = row?;
             by.entry(key).or_default().add(&t);
         }
@@ -494,15 +497,18 @@ pub fn token_report(
     Ok((totals, groups))
 }
 
-/// Token totals per `bucket` ms from `since`, buckets with nothing left out.
-pub fn token_series(c: &Connection, since: i64, until: i64, bucket: i64) -> rusqlite::Result<Vec<TokenPoint>> {
+/// Token totals per `bucket` ms from `since`, of one agent or all, buckets
+/// with nothing left out.
+pub fn token_series(c: &Connection, since: i64, until: i64, bucket: i64, agent: Option<&str>) -> rusqlite::Result<Vec<TokenPoint>> {
     let sums = "SUM(input), SUM(output), SUM(cache_read), SUM(cache_write)";
     let mut by: std::collections::BTreeMap<i64, TokenTotals> = std::collections::BTreeMap::new();
     for (table, time, requests) in TOKEN_TIERS {
-        let sql =
-            format!("SELECT ({time} - ?1) / ?3 * ?3 + ?1, {sums}, {requests} FROM {table} WHERE {time} >= ?1 AND {time} < ?2 GROUP BY 1");
+        let sql = format!(
+            "SELECT ({time} - ?1) / ?3 * ?3 + ?1, {sums}, {requests} FROM {table}
+             WHERE {time} >= ?1 AND {time} < ?2 AND (?4 IS NULL OR agent = ?4) GROUP BY 1"
+        );
         let mut stmt = c.prepare_cached(&sql)?;
-        let rows = stmt.query_map([since, until, bucket], |r| {
+        let rows = stmt.query_map(params![since, until, bucket, agent], |r| {
             let n = |i: usize| r.get::<_, Option<i64>>(i).map(|v| v.unwrap_or(0).max(0) as u64);
             Ok((r.get::<_, i64>(0)?, TokenTotals { input: n(1)?, output: n(2)?, cache_read: n(3)?, cache_write: n(4)?, requests: n(5)? }))
         })?;
@@ -514,8 +520,8 @@ pub fn token_series(c: &Connection, since: i64, until: i64, bucket: i64) -> rusq
     Ok(by.into_iter().map(|(t, totals)| TokenPoint { t, totals }).collect())
 }
 
-pub fn last_usage_ts(c: &Connection) -> rusqlite::Result<Option<i64>> {
-    c.query_row("SELECT MAX(ts) FROM token_usage", [], |r| r.get(0))
+pub fn last_usage_ts(c: &Connection, agent: Option<&str>) -> rusqlite::Result<Option<i64>> {
+    c.query_row("SELECT MAX(ts) FROM token_usage WHERE ?1 IS NULL OR agent = ?1", [agent], |r| r.get(0))
 }
 
 /// Ended sessions: key, when it ended, and the transcript Claude Code keeps
@@ -641,7 +647,7 @@ mod tests {
         store.send(Op::Usage(usage("c", 12 * hour, "opus", 5)));
         wait_for(&store, 3);
 
-        let (all, by_model) = store.read(|c| token_report(c, 0, i64::MAX, Some(TokenGroupBy::Model))).unwrap();
+        let (all, by_model) = store.read(|c| token_report(c, 0, i64::MAX, Some(TokenGroupBy::Model), None)).unwrap();
         assert_eq!((all.output, all.requests, all.total()), (15, 3, 15 + 3 + 300 + 30));
         assert_eq!(by_model[0].key, "opus");
         assert_eq!(by_model[0].totals.output, 12);
@@ -653,12 +659,24 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let (after, _) = store.read(|c| token_report(c, 0, i64::MAX, None)).unwrap();
+        let (after, _) = store.read(|c| token_report(c, 0, i64::MAX, None, None)).unwrap();
         assert_eq!(after, all);
-        let (window, _) = store.read(|c| token_report(c, 12 * hour, 13 * hour, None)).unwrap();
+        let (window, _) = store.read(|c| token_report(c, 12 * hour, 13 * hour, None, None)).unwrap();
         assert_eq!(window.output, 5);
-        let series = store.read(|c| token_series(c, 0, i64::MAX, hour)).unwrap();
+        let series = store.read(|c| token_series(c, 0, i64::MAX, hour, None)).unwrap();
         assert_eq!(series.iter().map(|p| (p.t / hour, p.totals.output)).collect::<Vec<_>>(), vec![(10, 10), (12, 5)]);
+
+        // One agent's share, in every tier.
+        store.send(Op::Usage(UsageRecord { agent: "codex".into(), ..usage("d", 12 * hour + 1, "gpt-6.1-sol", 4) }));
+        wait_for(&store, 4);
+        let (codex, by_agent) = store.read(|c| token_report(c, 0, i64::MAX, Some(TokenGroupBy::Agent), Some("codex"))).unwrap();
+        assert_eq!((codex.output, codex.requests, by_agent.len()), (4, 1, 1));
+        let (claude, _) = store.read(|c| token_report(c, 0, i64::MAX, None, Some("claude-code"))).unwrap();
+        assert_eq!(claude, all);
+        let series = store.read(|c| token_series(c, 0, i64::MAX, hour, Some("codex"))).unwrap();
+        assert_eq!(series.iter().map(|p| (p.t / hour, p.totals.output)).collect::<Vec<_>>(), vec![(12, 4)]);
+        assert_eq!(store.read(|c| last_usage_ts(c, Some("codex"))).unwrap(), Some(12 * hour + 1));
+        assert_eq!(store.read(|c| last_usage_ts(c, Some("nobody"))).unwrap(), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -691,7 +709,7 @@ mod tests {
             }
         }
         assert!(store.flush(std::time::Duration::from_secs(5)));
-        let before = store.read(|c| token_report(c, 0, i64::MAX, None)).unwrap().0;
+        let before = store.read(|c| token_report(c, 0, i64::MAX, None, None)).unwrap().0;
         let size_before = store.disk_bytes();
 
         // Day 0 and 1 leave the detail tier; day 0 also leaves the hourly tier.
@@ -706,14 +724,14 @@ mod tests {
             .unwrap();
         assert_eq!(tiers.0, 400, "day 2 stays per request");
         assert!(tiers.1 > 0 && tiers.2 == 1, "day 1 per hour, day 0 per day: {tiers:?}");
-        assert_eq!(store.read(|c| token_report(c, 0, i64::MAX, None)).unwrap().0, before);
-        let (one_day, _) = store.read(|c| token_report(c, 0, day, None)).unwrap();
+        assert_eq!(store.read(|c| token_report(c, 0, i64::MAX, None, None)).unwrap().0, before);
+        let (one_day, _) = store.read(|c| token_report(c, 0, day, None, None)).unwrap();
         assert_eq!(one_day.requests, 400);
 
         // The end of the history drops whole days.
         store.send(Op::Maintain(Cutoffs { token_daily: day, ..cut }));
         assert!(store.flush(std::time::Duration::from_secs(5)));
-        assert_eq!(store.read(|c| token_report(c, 0, i64::MAX, None)).unwrap().0.requests, 800);
+        assert_eq!(store.read(|c| token_report(c, 0, i64::MAX, None, None)).unwrap().0.requests, 800);
         assert!(store.disk_bytes() <= size_before, "compaction must not grow the file");
         std::fs::remove_dir_all(&dir).ok();
     }

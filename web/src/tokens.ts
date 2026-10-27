@@ -35,8 +35,8 @@ export const RANGES: Range[] = [
   { id: 'all', since: () => 0, seriesSince: n => localMidnight(n, 89), bucket: DAY, chartNote: 'range.allNote' },
 ]
 
-/** Refetches when the window moves or new requests are counted. */
-export const useTokenReport = (since: number, group?: 'model' | 'source') => {
+/** Refetches when the window or the agent changes, or new requests are counted. */
+export const useTokenReport = (since: number, group?: 'model' | 'source' | 'agent', agent?: string) => {
   const tick = useLive(s => s.tokensTick)
   const [data, setData] = useState<TokenReport>()
   const [error, setError] = useState<string>()
@@ -46,7 +46,7 @@ export const useTokenReport = (since: number, group?: 'model' | 'source') => {
     const t = setTimeout(
       () =>
         api
-          .tokens(since, group)
+          .tokens(since, group, agent)
           .then(r => alive && (setData(r), setError(undefined)))
           .catch(e => alive && setError(String(e))),
       tick ? 300 : 0,
@@ -55,20 +55,20 @@ export const useTokenReport = (since: number, group?: 'model' | 'source') => {
       alive = false
       clearTimeout(t)
     }
-  }, [since, group, tick])
+  }, [since, group, agent, tick])
   return { data, error }
 }
 
-export const useTokenSeries = (since: number, bucket: number) => {
+export const useTokenSeries = (since: number, bucket: number, agent?: string) => {
   const tick = useLive(s => s.tokensTick)
   const [data, setData] = useState<TokenSeries>()
   useEffect(() => {
     let alive = true
-    const t = setTimeout(() => api.tokenSeries(since, bucket).then(r => alive && setData(r)).catch(() => {}), tick ? 300 : 0)
+    const t = setTimeout(() => api.tokenSeries(since, bucket, agent).then(r => alive && setData(r)).catch(() => {}), tick ? 300 : 0)
     return () => {
       alive = false
       clearTimeout(t)
     }
-  }, [since, bucket, tick])
+  }, [since, bucket, agent, tick])
   return data
 }

@@ -22,10 +22,10 @@ export const api = {
   events: (before?: number) => get<EventRecord[]>(`/v1/events${query({ limit: 300, before })}`),
   quotaHistory: (hours: number, agent?: string) =>
     get<QuotaSample[]>(`/v1/quotas/history${query({ hours, agent })}`),
-  tokens: (since: number, group?: 'model' | 'source' | 'agent' | 'session') =>
-    get<TokenReport>(`/v1/tokens${query({ since, group })}`),
-  tokenSeries: (since: number, bucketMs: number) =>
-    get<TokenSeries>(`/v1/tokens/series${query({ since, bucket_ms: bucketMs })}`),
+  tokens: (since: number, group?: 'model' | 'source' | 'agent' | 'session', agent?: string) =>
+    get<TokenReport>(`/v1/tokens${query({ since, group, agent })}`),
+  tokenSeries: (since: number, bucketMs: number, agent?: string) =>
+    get<TokenSeries>(`/v1/tokens/series${query({ since, bucket_ms: bucketMs, agent })}`),
   stats: () => get<DaemonStats>('/v1/stats'),
   /** Runs a cleanup pass now; `allEnded` also forgets every ended session. */
   maintenance: async (allEnded: boolean) => {

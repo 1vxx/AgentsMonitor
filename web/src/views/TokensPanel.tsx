@@ -9,6 +9,7 @@ import { Seg, shortModel } from '../components/bits.tsx'
 import { Numeral, rise } from '../components/motion.tsx'
 import { Orb } from '../components/Orb.tsx'
 import { MEASURES, type Measure, TokenBars } from '../components/TokenBars.tsx'
+import { AgentFilter } from './LiveView.tsx'
 
 const sourceLabel = (key: string) => {
   if (!key) return t('src.none')
@@ -94,14 +95,19 @@ const NoCounts = () => {
 export const TokensPanel = ({ now }: { now: number }) => {
   const [rangeId, setRangeId] = useState<RangeId>('today')
   const [measure, setMeasure] = useState<Measure>('total')
+  const [agent, setAgent] = useState('')
   const range = RANGES.find(r => r.id === rangeId) ?? RANGES[0]!
   // Windows move with the minute, not the second: fewer refetches.
   const minute = Math.floor(now / 60_000) * 60_000
   const since = range.since(minute)
-  const { data: report, error } = useTokenReport(since)
-  const { data: byModel } = useTokenReport(since, 'model')
-  const { data: bySource } = useTokenReport(since, 'source')
-  const series = useTokenSeries(range.seriesSince(minute), range.bucket)
+  // Every agent ever counted, so the choice holds across ranges
+  const { data: byAgent } = useTokenReport(0, 'agent')
+  const agents = (byAgent?.groups ?? []).map(g => g.key).filter(Boolean).sort()
+  const only = agent || undefined
+  const { data: report, error } = useTokenReport(since, undefined, only)
+  const { data: byModel } = useTokenReport(since, 'model', only)
+  const { data: bySource } = useTokenReport(since, 'source', only)
+  const series = useTokenSeries(range.seriesSince(minute), range.bucket, only)
   useT()
 
   return (
@@ -113,11 +119,15 @@ export const TokensPanel = ({ now }: { now: number }) => {
           </span>
           <h2 className="section-title">Tokens</h2>
         </div>
-        <Seg label={t('tok.range')} value={rangeId} onChange={setRangeId} options={RANGES.map(r => ({ id: r.id, label: t(`range.${r.id}`) }))} />
+        <div className="toolbar">
+          <AgentFilter agents={agents} value={agent} onChange={setAgent} />
+          <Seg label={t('tok.range')} value={rangeId} onChange={setRangeId} options={RANGES.map(r => ({ id: r.id, label: t(`range.${r.id}`) }))} />
+        </div>
       </div>
       {error && <div className="error">{error}</div>}
 
-      {report && report.last_ts === undefined ? (
+      {/* Nothing counted at all: say how to start. One agent without requests just reads zero */}
+      {!agent && report && report.last_ts === undefined ? (
         <NoCounts />
       ) : (
         <>

@@ -72,8 +72,8 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | `GET /v1/events` | The global event history, newest first. `key`, `before`, `limit` |
 | `GET /v1/quotas` | The current rate-limit windows of each agent |
 | `GET /v1/quotas/history` | Rate-limit readings. `agent`, `hours` (default 168, max 2,160) |
-| `GET /v1/tokens` | Token totals (`input`, `output`, `cache_read`, `cache_write`, `requests`) over `[since, until)`, default the last 24 h. `group` = `model`, `source`, `agent` or `session` adds `groups`. `last_ts` is absent until the first request is counted |
-| `GET /v1/tokens/series` | Totals per bucket from `since`. `bucket_ms` defaults to one hour, is at least one minute, and is widened to keep at most 2,000 buckets. Empty buckets are omitted |
+| `GET /v1/tokens` | Token totals (`input`, `output`, `cache_read`, `cache_write`, `requests`) over `[since, until)`, default the last 24 h. `group` = `model`, `source`, `agent` or `session` adds `groups`. `agent` (`claude-code`, `codex`, ...) counts only that agent's requests. `last_ts` is absent until the first request is counted |
+| `GET /v1/tokens/series` | Totals per bucket from `since`. `bucket_ms` defaults to one hour, is at least one minute, and is widened to keep at most 2,000 buckets. Empty buckets are omitted. `agent` as for `/v1/tokens` |
 | `GET /v1/stats` | Daemon metrics: throughput, rejected events, counted and duplicate requests, OTLP exports and service names, WebSocket clients, resident memory, CPU time, row counts, database size (`db_bytes`) and retention policy (`retention`) |
 
 ## Write
