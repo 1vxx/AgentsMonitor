@@ -4,5 +4,9 @@
   "description": "Streams this session's status, tools, approvals and questions to the local agentsmon daemon",
   "author": { "name": "1v" },
   "license": "MIT",
+  "interface": {
+    "logo": "./assets/icon.svg",
+    "composerIcon": "./assets/icon.svg"
+  },
   "hooks": "./hooks/hooks.json"
 }
