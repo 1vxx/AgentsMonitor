@@ -1,12 +1,19 @@
 # agentsmon for Claude Code
 
-Streams what this Claude Code session is doing to the local agentsmon daemon: turns, tool calls, subagents, permission prompts and questions, compaction, context fill, cost, and the account's 5-hour and 7-day rate limits. The daemon feeds the AgentsMonitor web dashboard and, later, a small AMOLED display.
+Reports what a Claude Code session is doing to the local [AgentsMonitor](../../README.md) daemon: turns, tool calls, subagents, approvals and questions, compaction, context fill and the account's five-hour and seven-day rate limits.
 
-It runs as a hooks module inside Claude Code, so no process starts per event. Each hook only queues the event and returns; a timer sends batches over the daemon's Unix socket after the hook is done, so the session never waits on the monitor. While the daemon is down, events wait in a bounded queue and go out in order once it is back.
+## How it works
+
+- **In process.** The plugin is a Claude Code hooks module, so no process starts per event.
+- **Never blocking.** Each hook only queues an event and returns. A timer sends ordered batches over the daemon's Unix socket after the hook completes.
+- **Resilient.** While the daemon is down, up to 1,000 events wait and are sent in order once it is back. A heartbeat every 20 s keeps the session marked live and corrects work whose end event was lost.
+- **No phantom sessions.** Terminal sessions appear at launch. Claude Desktop and SDK sessions appear on first use, so the spare session Claude Desktop keeps warm stays out of the monitor.
+
+Token counts in the dashboard are exact only with OpenTelemetry export enabled; see [Enable exact token counts](../../README.md#3-enable-exact-token-counts). Without it, the plugin's per-turn usage provides an estimate.
 
 ## Setup
 
-Run the daemon (`agentsmon serve`, or `agentsmon service install` on macOS), then install the plugin from this repository's marketplace:
+Start the daemon (`agentsmon serve`), then install the plugin from the repository's marketplace:
 
 ```bash
 claude plugin marketplace add /path/to/AgentsMonitor
@@ -16,10 +23,14 @@ claude plugin marketplace add /path/to/AgentsMonitor
 claude plugin install agentsmon@agentsmon
 ```
 
+To try it without installing, start a session with `claude --plugin-dir /path/to/AgentsMonitor/plugins/claude-code`.
+
 ## Options
 
-- `detail`: `preview` (default) sends the start of prompts and answers and what each tool works on; `none` sends statuses and numbers only.
-- `socket`: the daemon's Unix socket; empty uses `$AGENTSMON_SOCKET` or `~/.agentsmon/agentsmon.sock`.
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `detail` | `preview` | `preview` sends the start of prompts and answers and what each tool works on; `none` sends statuses and numbers only |
+| `socket` | empty | The daemon's Unix socket; empty uses `$AGENTSMON_SOCKET`, then `~/.agentsmon/agentsmon.sock` |
 
 ## Development
 
