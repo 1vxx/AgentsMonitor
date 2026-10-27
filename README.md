@@ -155,7 +155,7 @@ The daemon reads `~/.agentsmon/config.toml`. Every field is optional; `agentsmon
 
 | View | Shows |
 | --- | --- |
-| Live | Overall state, session counts, today's tokens, rate-limit meters; session cards ordered by urgency, with sessions waiting for you highlighted; recently ended sessions; live event feed |
+| Live | Overall state, session counts, today's tokens, rate-limit meters; session cards in bands (waiting for you, working, idle, no signal): the longest wait first, then the newest turn, the latest to finish; the cards hold still while the pointer is over them; recently ended sessions; live event feed |
 | Session details | Context use, running tools and subagents, last prompt and answer, statistics, metadata, full timeline |
 | History | All stored sessions, with filter, search and paging |
 | Events | Global event stream, filterable by type |

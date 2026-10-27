@@ -36,9 +36,8 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
         live.push(s);
     }
 
-    // Most urgent first; among equals, the one waiting longest.
     live.sort_by(|a, b| {
-        (a.stale, std::cmp::Reverse(a.status), a.status_since).cmp(&(b.stale, std::cmp::Reverse(b.status), b.status_since))
+        board_key(a).cmp(&board_key(b)).then(b.started_at.cmp(&a.started_at)).then_with(|| a.key.cmp(&b.key))
     });
 
     let fresh = |pred: fn(Status) -> bool| live.iter().any(|s| !s.stale && pred(s.status));
@@ -87,6 +86,24 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
     }
 }
 
+/// Where a session stands, as the Live view orders its cards. Bands first:
+/// waiting on the person, working, idle, and last anything without a signal,
+/// whatever its status says. Within a band, a moment that moves only on a
+/// transition, never per tool call: the longest wait first, then the newest
+/// turn, the latest to settle, the last heard from.
+fn board_key(s: &Session) -> (u8, i64) {
+    if s.stale {
+        (3, -s.last_seen)
+    } else if s.status.is_waiting() {
+        (0, s.attention.as_ref().map_or(s.status_since, |a| a.since))
+    } else if s.status.is_working() {
+        let start = s.turn.as_ref().map(|t| t.started_at).or_else(|| s.subagents.first().map(|a| a.started_at));
+        (1, -start.unwrap_or(s.status_since))
+    } else {
+        (2, -s.status_since)
+    }
+}
+
 /// Two summaries say the same thing (the timestamp aside).
 pub fn same(a: &Summary, b: &Summary) -> bool {
     a.mood == b.mood && a.counts == b.counts && a.sessions == b.sessions && a.quotas == b.quotas
@@ -108,6 +125,38 @@ mod tests {
         assert_eq!(summary.mood, Mood::Attention);
         assert_eq!(summary.sessions[0].key, "claude-code:b");
         assert_eq!((summary.counts.live, summary.counts.waiting, summary.counts.thinking), (2, 1, 1));
+    }
+
+    #[test]
+    fn orders_by_band_then_moment() {
+        let turn = Event::TurnStart { turn_id: None, agent_id: None, preview: None };
+        let ask = |kind| Event::Attention { kind, tool: None, subject: None, message: None };
+        let answered = Event::TurnEnd { turn_id: None, agent_id: None, outcome: TurnOutcome::Answer, duration_ms: None, usage: None, preview: None };
+        let tool = Event::ToolStart { id: Some("t".into()), tool: "Bash".into(), agent_id: None, subject: None };
+
+        let mut early_turn = new_session("claude-code", "early-turn", 0);
+        apply(&mut early_turn, 10, &turn);
+        apply(&mut early_turn, 90, &tool); // a tool call does not move it
+        let mut late_turn = new_session("claude-code", "late-turn", 0);
+        apply(&mut late_turn, 50, &turn);
+        let mut asked_first = new_session("claude-code", "asked-first", 0);
+        apply(&mut asked_first, 20, &ask(AttentionKind::Input));
+        let mut asked_next = new_session("claude-code", "asked-next", 0);
+        apply(&mut asked_next, 30, &ask(AttentionKind::Permission));
+        let mut idle_long = new_session("claude-code", "idle-long", 0);
+        apply(&mut idle_long, 5, &turn);
+        apply(&mut idle_long, 6, &answered);
+        let mut idle_new = new_session("claude-code", "idle-new", 0);
+        apply(&mut idle_new, 5, &turn);
+        apply(&mut idle_new, 60, &answered);
+        let mut quiet = new_session("claude-code", "quiet", 0);
+        apply(&mut quiet, 1, &ask(AttentionKind::Permission));
+        quiet.stale = true;
+
+        let all = [&quiet, &idle_long, &early_turn, &asked_next, &idle_new, &late_turn, &asked_first];
+        let keys: Vec<_> = build(all.into_iter(), &[], 100).sessions.into_iter().map(|s| s.key).collect();
+        let want = ["asked-first", "asked-next", "late-turn", "early-turn", "idle-new", "idle-long", "quiet"];
+        assert_eq!(keys, want.map(|k| format!("claude-code:{k}")));
     }
 
     #[test]
