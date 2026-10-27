@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { api } from '../api.ts'
 import { compact, dateTime, duration, tildify } from '../format.ts'
+import { useT } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { Session } from '../types.ts'
 import { AgentBadge, Empty, SearchIcon, StatusPill, statusView } from '../components/bits.tsx'
@@ -36,6 +37,7 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
   const [error, setError] = useState<string>()
   const [agent, setAgent] = useState('')
   const [q, setQ] = useState('')
+  const t = useT()
 
   const load = useCallback(
     async (offset: number) => {
@@ -78,34 +80,34 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
             <b>01</b> Archive
           </span>
           <h2 className="section-title">
-            全部会话 {!first && <Numeral className="count" value={shown.length} />}
+            {t('hist.title')} {!first && <Numeral className="count" value={shown.length} />}
           </h2>
         </div>
         <div className="toolbar">
           <AgentFilter agents={agents} value={agent} onChange={setAgent} />
           <label className="field">
             <SearchIcon />
-            <input placeholder="搜索项目、目录、提示…" value={q} onChange={e => setQ(e.target.value)} aria-label="搜索" />
+            <input placeholder={t('hist.search')} value={q} onChange={e => setQ(e.target.value)} aria-label={t('common.search')} />
           </label>
         </div>
       </motion.div>
       {error && <div className="error">{error}</div>}
       {shown.length === 0 && !loading ? (
-        <Empty title={q ? `没有匹配「${q}」的会话` : '没有记录'} />
+        <Empty title={q ? t('hist.noMatch', { q }) : t('hist.empty')} />
       ) : (
         <motion.div className="table-wrap" {...rise(1)}>
           <table className="table">
             <thead>
               <tr>
-                <th>项目</th>
-                <th>状态</th>
-                <th>开始</th>
-                <th>最近活动</th>
-                <th className="num">回合</th>
-                <th className="num">工具</th>
-                <th className="num">输入 / 输出</th>
-                <th className="num">Tokens 合计</th>
-                <th className="num">工作时长</th>
+                <th>{t('col.project')}</th>
+                <th>{t('col.status')}</th>
+                <th>{t('col.started')}</th>
+                <th>{t('col.updated')}</th>
+                <th className="num">{t('col.turns')}</th>
+                <th className="num">{t('col.tools')}</th>
+                <th className="num">{t('col.io')}</th>
+                <th className="num">{t('col.total')}</th>
+                <th className="num">{t('col.busy')}</th>
               </tr>
             </thead>
             <tbody>
@@ -140,7 +142,7 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
                     <td className="num nowrap">
                       {compact(s.stats.input_tokens)} <span className="muted">/</span> {compact(s.stats.output_tokens)}
                     </td>
-                    <td className="num nowrap strong" title={s.stats.exact_tokens ? '逐请求精确计数' : '按回合估算'}>
+                    <td className="num nowrap strong" title={t(s.stats.exact_tokens ? 'hist.exact' : 'hist.estimate')}>
                       {s.stats.exact_tokens ? '' : '≈'}
                       {compact(sessionTokens(s))}
                     </td>
@@ -154,7 +156,7 @@ export const HistoryView = ({ onOpen }: { onOpen: (key: string) => void }) => {
       )}
       {!done && !first && (
         <button className="link-btn" disabled={loading} onClick={() => void load(rows.length)}>
-          {loading ? '加载中…' : '加载更多'}
+          {t(loading ? 'hist.loading' : 'hist.more')}
         </button>
       )}
     </div>

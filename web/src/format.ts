@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+// `t` is a timestamp in here, so the translator goes by another name
+import { dateLocale, t as i18n } from './i18n/index.ts'
 
 /** Re-renders every `ms` with the current time. */
 export const useNow = (ms = 1000) => {
@@ -22,15 +24,15 @@ export const duration = (ms: number) => {
 
 export const ago = (ts: number, now: number) => {
   const d = now - ts
-  if (d < 5_000) return '刚刚'
-  return `${duration(d).split(' ')[0]}前`
+  if (d < 5_000) return i18n('time.justNow')
+  return i18n('time.ago', { d: duration(d).split(' ')[0]! })
 }
 
 export const clock = (ts: number) =>
-  new Date(ts).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  new Date(ts).toLocaleTimeString(dateLocale(), { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 export const dateTime = (ts: number) =>
-  new Date(ts).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  new Date(ts).toLocaleString(dateLocale(), { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 
 export const compact = (n: number) => {
   if (n < 1000) return String(n)
@@ -54,5 +56,5 @@ export const until = (iso: string | undefined, now: number) => {
   if (!iso) return undefined
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return undefined
-  return t <= now ? '即将重置' : `${duration(t - now).replace(/ \d+s$/, '')}后重置`
+  return t <= now ? i18n('time.resetSoon') : i18n('time.resetIn', { d: duration(t - now).replace(/ \d+s$/, '') })
 }

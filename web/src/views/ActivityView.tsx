@@ -2,18 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { api } from '../api.ts'
 import { clock } from '../format.ts'
+import { t, useT, type Key } from '../i18n/index.ts'
 import { seedFeed, useLive } from '../store.ts'
 import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
 import { describe } from '../components/events.tsx'
 import { rise } from '../components/motion.tsx'
 
 const GROUPS = [
-  { id: '', label: '全部', types: [] },
-  { id: 'ask', label: '需要你', types: ['attention'] },
-  { id: 'turn', label: '回合', types: ['prompt', 'turn.start', 'turn.end'] },
-  { id: 'tool', label: '工具', types: ['tool.start', 'tool.end'] },
-  { id: 'session', label: '会话', types: ['session.start', 'session.end', 'compact.start', 'compact.end', 'notice'] },
-] as const satisfies readonly { id: string; label: string; types: readonly string[] }[]
+  { id: '', name: 'grp.all', types: [] },
+  { id: 'ask', name: 'grp.ask', types: ['attention'] },
+  { id: 'turn', name: 'grp.turn', types: ['prompt', 'turn.start', 'turn.end'] },
+  { id: 'tool', name: 'grp.tool', types: ['tool.start', 'tool.end'] },
+  { id: 'session', name: 'grp.session', types: ['session.start', 'session.end', 'compact.start', 'compact.end', 'notice'] },
+] as const satisfies readonly { id: string; name: Key; types: readonly string[] }[]
 type Group = (typeof GROUPS)[number]['id']
 
 /** "14:32" for the first event of each minute, so the list reads in paragraphs. */
@@ -24,6 +25,7 @@ export const ActivityView = ({ onOpen }: { onOpen: (key: string) => void }) => {
   const sessions = useLive(s => s.sessions)
   const [group, setGroup] = useState<Group>('')
   const [error, setError] = useState<string>()
+  useT()
 
   useEffect(() => {
     api.events().then(seedFeed).catch(e => setError(String(e)))
@@ -41,13 +43,13 @@ export const ActivityView = ({ onOpen }: { onOpen: (key: string) => void }) => {
           <span className="kicker">
             <b>01</b> Event stream
           </span>
-          <h2 className="section-title">事件流</h2>
+          <h2 className="section-title">{t('act.title')}</h2>
         </div>
-        <Seg label="按类型筛选" value={group} onChange={setGroup} options={GROUPS} />
+        <Seg label={t('act.filter')} value={group} onChange={setGroup} options={GROUPS.map(g => ({ id: g.id, label: t(g.name) }))} />
       </motion.div>
       {error && <div className="error">{error}</div>}
       {shown.length === 0 ? (
-        <Empty title="还没有事件" />
+        <Empty title={t('drawer.noEvents')} />
       ) : (
         <motion.ol className="chronicle" key={group} {...rise(1)}>
           {shown.map((r, i) => {

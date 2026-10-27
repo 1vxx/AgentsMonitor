@@ -2,6 +2,7 @@ import { useId, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { agentInfo } from '../agents.ts'
 import { duration, pct } from '../format.ts'
+import { t } from '../i18n/index.ts'
 import type { Session } from '../types.ts'
 import { EASE, Numeral } from './motion.tsx'
 import { Orb } from './Orb.tsx'
@@ -19,26 +20,26 @@ type StatusFacts = Pick<Session, 'status' | 'stale' | 'last_turn' | 'tools' | 'e
 
 /** How a session's state reads on screen: a label, a tone, an icon; never color alone. */
 export const statusView = (s: StatusFacts): StatusView => {
-  if (s.status === 'ended') return { label: s.end_reason === 'lost' ? '已失联结束' : '已结束', tone: 'muted', icon: 'stop' }
-  if (s.stale) return { label: '无信号', tone: 'muted', icon: 'stale' }
+  if (s.status === 'ended') return { label: t(s.end_reason === 'lost' ? 'status.lost' : 'status.ended'), tone: 'muted', icon: 'stop' }
+  if (s.stale) return { label: t('status.stale'), tone: 'muted', icon: 'stale' }
   switch (s.status) {
     case 'waiting_permission':
-      return { label: '等待授权', tone: 'attention', icon: 'alert' }
+      return { label: t('status.permission'), tone: 'attention', icon: 'alert' }
     case 'waiting_input':
-      return { label: '等待回答', tone: 'attention', icon: 'ask' }
+      return { label: t('status.input'), tone: 'attention', icon: 'ask' }
     case 'tool': {
       const tool = s.tools?.at(-1)?.tool
-      return { label: tool ? `执行 ${shortTool(tool)}` : '执行工具', tone: 'active', icon: 'spin' }
+      return { label: tool ? t('status.tool', { tool: shortTool(tool) }) : t('status.toolAny'), tone: 'active', icon: 'spin' }
     }
     case 'thinking':
-      return { label: '思考中', tone: 'active', icon: 'pulse' }
+      return { label: t('status.thinking'), tone: 'active', icon: 'pulse' }
     case 'compacting':
-      return { label: '压缩上下文', tone: 'active', icon: 'pulse' }
+      return { label: t('status.compacting'), tone: 'active', icon: 'pulse' }
     default: {
       const outcome = s.last_turn?.outcome
-      if (outcome === 'error' || outcome === 'refusal') return { label: outcome === 'error' ? '上轮出错' : '上轮被拒', tone: 'critical', icon: 'x' }
-      if (outcome === 'aborted') return { label: '已中断', tone: 'idle', icon: 'pause' }
-      return { label: '空闲', tone: 'idle', icon: 'dot' }
+      if (outcome === 'error' || outcome === 'refusal') return { label: t(outcome === 'error' ? 'status.error' : 'status.refusal'), tone: 'critical', icon: 'x' }
+      if (outcome === 'aborted') return { label: t('status.aborted'), tone: 'idle', icon: 'pause' }
+      return { label: t('status.idle'), tone: 'idle', icon: 'dot' }
     }
   }
 }

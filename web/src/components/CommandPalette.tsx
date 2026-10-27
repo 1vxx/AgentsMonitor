@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { api } from '../api.ts'
 import { ago, tildify } from '../format.ts'
+import { LOCALES, inAll, setLocale, useLocale, useT } from '../i18n/index.ts'
 import { TABS, THEMES, isMac, type Theme } from '../nav.ts'
 import { useLive } from '../store.ts'
 import type { Session } from '../types.ts'
 import { AgentBadge, SearchIcon, StatusPill, statusView } from './bits.tsx'
 import { EASE } from './motion.tsx'
 
-// ⌘K: find any session, live or past, jump to a view, change the theme.
+// ⌘K: find any session, live or past, jump to a view, change the theme or
+// the language. Views, themes and languages match in every language.
 
 interface Item {
   id: string
@@ -41,6 +43,8 @@ export const CommandPalette = ({
   const [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
+  const t = useT()
+  const locale = useLocale()
 
   useEffect(() => {
     input.current?.focus()
@@ -66,23 +70,28 @@ export const CommandPalette = ({
 
     const out: Item[] = sessions.map(s => ({
       id: s.key,
-      group: '会话',
+      group: t('pal.sessions'),
       lead: <AgentBadge agent={s.agent} />,
       title: s.meta.project ?? s.session_id.slice(0, 8),
       sub: <span className="mono">{tildify(s.meta.cwd) ?? s.session_id}</span>,
       aside: s.status === 'ended' ? <span className="muted small">{ago(s.updated_at, now)}</span> : <StatusPill view={statusView(s)} />,
       run: () => onOpen(s.key),
     }))
-    TABS.forEach((t, i) => {
-      if (needle && !`${t.label} ${t.en} ${t.id} 跳转 视图`.toLowerCase().includes(needle)) return
-      out.push({ id: `tab:${t.id}`, group: '跳转', title: t.label, sub: t.en, aside: <kbd>{i + 1}</kbd>, run: () => void (location.hash = t.id) })
+    const chosen = <span className="muted small">{t('pal.current')}</span>
+    TABS.forEach((v, i) => {
+      if (needle && !`${inAll(`tab.${v.id}`)} ${v.id} ${inAll('pal.jump')}`.toLowerCase().includes(needle)) return
+      out.push({ id: `tab:${v.id}`, group: t('pal.jump'), title: t(`tab.${v.id}`), sub: `#${v.id}`, aside: <kbd>{i + 1}</kbd>, run: () => void (location.hash = v.id) })
     })
-    for (const t of THEMES) {
-      if (needle && !`${t.label} 主题 theme ${t.id}`.toLowerCase().includes(needle)) continue
-      out.push({ id: `theme:${t.id}`, group: '主题', title: t.label, aside: theme === t.id ? <span className="muted small">当前</span> : undefined, run: () => onTheme(t.id) })
+    for (const id of THEMES) {
+      if (needle && !`${inAll(`theme.${id}`)} ${inAll('pal.theme')} ${id}`.toLowerCase().includes(needle)) continue
+      out.push({ id: `theme:${id}`, group: t('pal.theme'), title: t(`theme.${id}`), aside: theme === id ? chosen : undefined, run: () => onTheme(id) })
+    }
+    for (const l of LOCALES) {
+      if (needle && !`${l.label} ${l.id} ${inAll('pal.language')}`.toLowerCase().includes(needle)) continue
+      out.push({ id: `lang:${l.id}`, group: t('pal.language'), title: l.label, aside: locale === l.id ? chosen : undefined, run: () => setLocale(l.id) })
     }
     return out
-  }, [q, past, live, now, theme, onOpen, onTheme])
+  }, [q, past, live, now, theme, locale, t, onOpen, onTheme])
 
   const current = Math.min(active, Math.max(0, items.length - 1))
 
@@ -128,7 +137,7 @@ export const CommandPalette = ({
         className="palette"
         role="dialog"
         aria-modal="true"
-        aria-label="命令面板"
+        aria-label={t('pal.label')}
         onMouseDown={e => e.stopPropagation()}
         initial={{ opacity: 0, y: -14, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -145,8 +154,8 @@ export const CommandPalette = ({
               setActive(0)
             }}
             onKeyDown={onKey}
-            placeholder="搜索会话、跳转视图、切换主题…"
-            aria-label="搜索"
+            placeholder={t('pal.placeholder')}
+            aria-label={t('common.search')}
             role="combobox"
             aria-expanded="true"
             aria-controls="palette-list"
@@ -155,7 +164,7 @@ export const CommandPalette = ({
           <kbd>esc</kbd>
         </label>
         <div className="palette-list" id="palette-list" role="listbox" ref={list}>
-          {items.length === 0 && <div className="palette-empty">没有匹配「{q}」的结果</div>}
+          {items.length === 0 && <div className="palette-empty">{t('pal.empty', { q })}</div>}
           {items.map((item, i) => (
             <div key={item.id} className="palette-group-wrap">
               {item.group !== items[i - 1]?.group && <div className="palette-group label">{item.group}</div>}
@@ -182,13 +191,13 @@ export const CommandPalette = ({
         <div className="palette-foot">
           <span>
             <kbd>↑</kbd>
-            <kbd>↓</kbd> 选择
+            <kbd>↓</kbd> {t('pal.select')}
           </span>
           <span>
-            <kbd>↵</kbd> 打开
+            <kbd>↵</kbd> {t('pal.open')}
           </span>
           <span>
-            <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd> 开关
+            <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd> {t('pal.toggle')}
           </span>
         </div>
       </motion.div>

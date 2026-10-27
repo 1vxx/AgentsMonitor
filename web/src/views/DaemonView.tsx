@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../api.ts'
 import { bytes, compact, dateTime, duration } from '../format.ts'
+import { t, useT } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { DaemonStats, MaintenanceReport } from '../types.ts'
 import { Numeral, rise } from '../components/motion.tsx'
@@ -19,14 +20,14 @@ const summarize = (r: MaintenanceReport) => {
   const parts: string[] = []
   if (r.forgotten > 0) {
     const why = [
-      r.too_old && `${r.too_old} 个超过保留期`,
-      r.transcript_gone && `${r.transcript_gone} 个已在 Claude 中删除`,
-      r.ended && `${r.ended} 个已结束`,
+      r.too_old && t('dm.tooOld', { n: r.too_old }),
+      r.transcript_gone && t('dm.gone', { n: r.transcript_gone }),
+      r.ended && t('dm.ended', { n: r.ended }),
     ].filter(Boolean)
-    parts.push(`删除了 ${r.forgotten} 个会话（${why.join('，')}）`)
+    parts.push(t('dm.forgot', { n: r.forgotten, why: why.join(t('list.sep')) }))
   }
-  if (r.archived > 0) parts.push(`${r.archived} 个已归档的会话移出了实时视图`)
-  return parts.length ? parts.join('；') : '没有需要清理的会话'
+  if (r.archived > 0) parts.push(t('dm.archived', { n: r.archived }))
+  return parts.length ? parts.join(t('dm.partSep')) : t('dm.nothing')
 }
 
 /** Runs the cleanup now, or forgets every ended session (archived ones included). */
@@ -34,9 +35,10 @@ const Cleanup = ({ ended, onDone }: { ended: number; onDone: () => void }) => {
   const [busy, setBusy] = useState<'retention' | 'all'>()
   const [report, setReport] = useState<MaintenanceReport>()
   const [error, setError] = useState<string>()
+  useT()
 
   const run = async (all: boolean) => {
-    if (all && !confirm(`删除全部 ${ended} 个已结束的会话及其事件？进行中的会话不受影响，token 用量统计保留。此操作不能撤销。`)) return
+    if (all && !confirm(t('dm.confirmAll', { n: ended }))) return
     setBusy(all ? 'all' : 'retention')
     setError(undefined)
     try {
@@ -53,14 +55,14 @@ const Cleanup = ({ ended, onDone }: { ended: number; onDone: () => void }) => {
     <div className="cleanup">
       <div className="cleanup-actions">
         <button className="btn btn-primary" disabled={busy !== undefined} onClick={() => void run(false)}>
-          {busy === 'retention' ? '清理中…' : '立即清理'}
+          {t(busy === 'retention' ? 'dm.cleaning' : 'dm.cleanNow')}
         </button>
         <button className="btn btn-danger" disabled={busy !== undefined || ended === 0} onClick={() => void run(true)}>
-          {busy === 'all' ? '删除中…' : `删除全部已结束会话（${ended}）`}
+          {busy === 'all' ? t('dm.removing') : t('dm.removeAll', { n: ended })}
         </button>
       </div>
       <div className="footnote">
-        立即清理：马上按上面的规则执行一次（同步删除和归档、清理过期数据），并整理数据库。删除全部已结束会话：把所有已结束的会话连同历史一起删掉，只保留进行中的会话。
+        {t('dm.cleanupNote')}
       </div>
       {error && <div className="error">{error}</div>}
       <AnimatePresence>
@@ -73,7 +75,7 @@ const Cleanup = ({ ended, onDone }: { ended: number; onDone: () => void }) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
           >
-            {summarize(report)}；数据库 {bytes(report.db_bytes_before)} → {bytes(report.db_bytes_after)}，用时 {report.duration_ms} ms
+            {t('dm.result', { summary: summarize(report), before: bytes(report.db_bytes_before), after: bytes(report.db_bytes_after), ms: report.duration_ms })}
           </motion.div>
         )}
       </AnimatePresence>
@@ -83,6 +85,7 @@ const Cleanup = ({ ended, onDone }: { ended: number; onDone: () => void }) => {
 
 export const DaemonView = () => {
   const server = useLive(s => s.server)
+  useT()
   const conn = useLive(s => s.conn)
   const [stats, setStats] = useState<DaemonStats>()
   const [error, setError] = useState<string>()
@@ -109,29 +112,29 @@ export const DaemonView = () => {
           <span className="kicker">
             <b>01</b> Daemon
           </span>
-          <h2 className="section-title">守护进程</h2>
+          <h2 className="section-title">{t('dm.title')}</h2>
         </div>
         <span className="section-meta">
-          {server ? `${server.name} ${server.version} · 协议 v${server.protocol} · 启动于 ${dateTime(server.started_at)}` : conn}
+          {server ? t('dm.meta', { name: server.name, version: server.version, protocol: server.protocol, t: dateTime(server.started_at) }) : conn}
         </span>
       </motion.div>
       {error && <div className="error">{error}</div>}
       {stats ? (
         <dl className="grid-stats grid-stats-lg">
-          <Stat i={0} label="运行时长" value={duration(stats.uptime_ms)} />
-          <Stat i={1} label="常驻内存" value={bytes(stats.rss_bytes)} />
-          <Stat i={2} label="累计 CPU" value={stats.cpu_ms !== undefined ? `${(stats.cpu_ms / 1000).toFixed(2)}s` : '—'} />
-          <Stat i={3} label="接收事件" value={<Count v={stats.events_in} />} />
-          <Stat i={4} label="接收批次" value={<Count v={stats.batches_in} />} />
-          <Stat i={5} label="拒收" value={<Count v={stats.rejected} />} />
-          <Stat i={6} label="WebSocket 客户端" value={<Count v={stats.ws_clients} />} />
-          <Stat i={7} label="活动 / 内存中会话" value={`${stats.sessions_live} / ${stats.sessions_in_memory}`} />
-          <Stat i={8} label="库中会话" value={<Count v={stats.db?.sessions ?? 0} />} />
-          <Stat i={9} label="库中事件" value={<Count v={stats.db?.events ?? 0} />} />
-          <Stat i={10} label="额度读数" value={<Count v={stats.db?.quota_samples ?? 0} />} />
-          <Stat i={11} label="已计数模型请求" value={<Count v={stats.db?.token_requests ?? 0} />} />
-          <Stat i={12} label="重复投递（已去重）" value={<Count v={stats.usage_duplicates ?? 0} />} />
-          <Stat i={13} label="数据库大小" value={bytes(stats.db_bytes)} />
+          <Stat i={0} label={t('dm.uptime')} value={duration(stats.uptime_ms)} />
+          <Stat i={1} label={t('dm.rss')} value={bytes(stats.rss_bytes)} />
+          <Stat i={2} label={t('dm.cpu')} value={stats.cpu_ms !== undefined ? `${(stats.cpu_ms / 1000).toFixed(2)}s` : '—'} />
+          <Stat i={3} label={t('dm.events')} value={<Count v={stats.events_in} />} />
+          <Stat i={4} label={t('dm.batches')} value={<Count v={stats.batches_in} />} />
+          <Stat i={5} label={t('dm.rejected')} value={<Count v={stats.rejected} />} />
+          <Stat i={6} label={t('dm.ws')} value={<Count v={stats.ws_clients} />} />
+          <Stat i={7} label={t('dm.sessions')} value={`${stats.sessions_live} / ${stats.sessions_in_memory}`} />
+          <Stat i={8} label={t('dm.dbSessions')} value={<Count v={stats.db?.sessions ?? 0} />} />
+          <Stat i={9} label={t('dm.dbEvents')} value={<Count v={stats.db?.events ?? 0} />} />
+          <Stat i={10} label={t('dm.quota')} value={<Count v={stats.db?.quota_samples ?? 0} />} />
+          <Stat i={11} label={t('dm.requests')} value={<Count v={stats.db?.token_requests ?? 0} />} />
+          <Stat i={12} label={t('dm.dupes')} value={<Count v={stats.usage_duplicates ?? 0} />} />
+          <Stat i={13} label={t('dm.dbSize')} value={bytes(stats.db_bytes)} />
         </dl>
       ) : (
         !error && <span className="skeleton" style={{ height: 260 }} />
@@ -142,20 +145,23 @@ export const DaemonView = () => {
             <span className="kicker">
               <b>02</b> Retention
             </span>
-            <h3 className="section-title section-title-sm">数据保留</h3>
+            <h3 className="section-title section-title-sm">{t('dm.retention')}</h3>
           </div>
           <ul>
             <li>
-              已结束的会话及其事件保留 {stats.retention.sessions_days} 天
-              {stats.retention.follow_transcripts && '；在 Claude Code 里删除的会话（App 里删除，或自动清理）15 秒内同步删除'}
+              {t('dm.ret.sessions', { n: stats.retention.sessions_days })}
+              {stats.retention.follow_transcripts && t('dm.ret.follow')}
             </li>
-            <li>在 Claude 桌面 App 里归档的会话 15 秒内移出实时视图（含"最近结束"），历史页仍可查看；取消归档后继续使用会带着原来的统计回来</li>
-            <li>事件历史 {stats.retention.events_days} 天，额度读数 {stats.retention.quota_days} 天</li>
+            <li>{t('dm.ret.archive')}</li>
+            <li>{t('dm.ret.events', { e: stats.retention.events_days, q: stats.retention.quota_days })}</li>
             <li>
-              Token：逐请求保留 {stats.retention.token_detail_days} 天，之后按小时汇总保留到 {stats.retention.token_hourly_days} 天，再按天汇总保留到{' '}
-              {Math.round(stats.retention.token_daily_days / 365)} 年；每一步合计都不变
+              {t('dm.ret.tokens', {
+                d: stats.retention.token_detail_days,
+                h: stats.retention.token_hourly_days,
+                y: Math.round(stats.retention.token_daily_days / 365),
+              })}
             </li>
-            <li>每 10 分钟自动清理一次，删除后空间立即归还磁盘</li>
+            <li>{t('dm.ret.sweep')}</li>
           </ul>
           <Cleanup ended={Math.max(0, (stats.db?.sessions ?? 0) - stats.sessions_live)} onDone={() => void refresh()} />
         </motion.section>

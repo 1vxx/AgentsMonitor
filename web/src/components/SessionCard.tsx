@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { motion } from 'motion/react'
 import { ago, compact, duration, tildify } from '../format.ts'
+import { has, t, useT } from '../i18n/index.ts'
 import { tokenTotal, type Session } from '../types.ts'
 import { AgentBadge, Icon, Meter, StatusPill, shortModel, shortTool, statusView } from './bits.tsx'
 import { EASE } from './motion.tsx'
@@ -13,7 +14,10 @@ export const sessionTokens = (s: Session) =>
     cache_write: s.stats.cache_write_tokens,
   })
 
-const OUTCOME_TEXT: Record<string, string> = { answer: '已回复', aborted: '被中断', refusal: '被拒绝', error: '出错' }
+const outcomeText = (outcome: string) => {
+  const key = `card.outcome.${outcome}`
+  return has(key) ? t(key) : outcome
+}
 
 const Activity = ({ s, now }: { s: Session; now: number }) => {
   if (s.attention && s.attention.kind !== 'idle') {
@@ -22,7 +26,7 @@ const Activity = ({ s, now }: { s: Session; now: number }) => {
         <span className="tone-attention" style={{ display: 'inline-flex' }}>
           <Icon name={s.attention.kind === 'permission' ? 'alert' : 'ask'} />
         </span>
-        <span className="activity-label">{s.attention.kind === 'permission' ? '请求批准' : '向你提问'}</span>
+        <span className="activity-label">{t(s.attention.kind === 'permission' ? 'card.askPermission' : 'card.askInput')}</span>
         {s.attention.tool && <code className="tool">{shortTool(s.attention.tool)}</code>}
         <span className="mono subject">{s.attention.subject ?? s.attention.message}</span>
       </div>
@@ -41,7 +45,7 @@ const Activity = ({ s, now }: { s: Session; now: number }) => {
   if (s.turn) {
     return (
       <div className="activity">
-        <span className="activity-label">本轮已进行</span>
+        <span className="activity-label">{t('card.turnRunning')}</span>
         <span className="activity-dots" aria-hidden>
           <i />
           <i />
@@ -54,20 +58,21 @@ const Activity = ({ s, now }: { s: Session; now: number }) => {
   if (s.last_turn) {
     return (
       <div className="activity activity-done">
-        <span className="activity-label">{OUTCOME_TEXT[s.last_turn.outcome] ?? s.last_turn.outcome}</span>
-        {s.last_turn.duration_ms !== undefined && <span>用时 {duration(s.last_turn.duration_ms)}</span>}
+        <span className="activity-label">{outcomeText(s.last_turn.outcome)}</span>
+        {s.last_turn.duration_ms !== undefined && <span>{t('card.took', { d: duration(s.last_turn.duration_ms) })}</span>}
         <span className="activity-time">{ago(s.last_turn.ended_at, now)}</span>
       </div>
     )
   }
   return (
     <div className="activity activity-done">
-      <span className="activity-label">等待第一个提示</span>
+      <span className="activity-label">{t('card.firstPrompt')}</span>
     </div>
   )
 }
 
 export const SessionCard = memo(function SessionCard({ s, now, onOpen, i = 0 }: { s: Session; now: number; onOpen: (key: string) => void; i?: number }) {
+  useT()
   const view = statusView(s)
   const project = s.meta.project ?? s.session_id.slice(0, 8)
   const agents = s.subagents?.length ?? 0
@@ -98,13 +103,13 @@ export const SessionCard = memo(function SessionCard({ s, now, onOpen, i = 0 }: 
       {s.last_prompt && <p className="card-prompt">{s.last_prompt}</p>}
       <footer className="card-foot">
         <div className="card-ctx">
-          <Meter size="sm" value={s.context?.percent} label="上下文" />
+          <Meter size="sm" value={s.context?.percent} label={t('card.context')} />
         </div>
-        <span className="card-fact" title={s.stats.exact_tokens ? '本会话 tokens（逐请求精确计数）' : '本会话 tokens（按回合估算）'}>
+        <span className="card-fact" title={t(s.stats.exact_tokens ? 'card.tokensExact' : 'card.tokensEstimate')}>
           {s.stats.exact_tokens ? '' : '≈'}
           {compact(sessionTokens(s))} <span className="muted">tokens</span>
         </span>
-        {agents > 0 && <span className="chip">子代理 ×{agents}</span>}
+        {agents > 0 && <span className="chip">{t('card.subagents', { n: agents })}</span>}
         {s.meta.permission_mode && s.meta.permission_mode !== 'default' && (
           <span className={`chip${s.meta.permission_mode === 'bypassPermissions' ? ' chip-warn' : ''}`}>{s.meta.permission_mode}</span>
         )}

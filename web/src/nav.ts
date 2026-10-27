@@ -1,13 +1,8 @@
 // Where the dashboard can go and how it looks: shared by the masthead, the
 // keyboard shortcuts and the command palette.
 
-export const TABS = [
-  { id: 'live', label: '实时', en: 'Live' },
-  { id: 'history', label: '历史', en: 'History' },
-  { id: 'activity', label: '事件', en: 'Events' },
-  { id: 'usage', label: '用量', en: 'Usage' },
-  { id: 'daemon', label: '守护进程', en: 'Daemon' },
-] as const
+// Their names are in the dictionaries, under tab.<id> and theme.<id>.
+export const TABS = [{ id: 'live' }, { id: 'history' }, { id: 'activity' }, { id: 'usage' }, { id: 'daemon' }] as const
 export type Tab = (typeof TABS)[number]['id']
 
 export const tabFromHash = (): Tab => {
@@ -18,11 +13,7 @@ export const tabFromHash = (): Tab => {
 }
 
 export type Theme = 'system' | 'dark' | 'light'
-export const THEMES: { id: Theme; label: string }[] = [
-  { id: 'system', label: '跟随系统' },
-  { id: 'light', label: '浅色' },
-  { id: 'dark', label: '深色' },
-]
+export const THEMES: readonly Theme[] = ['system', 'light', 'dark']
 const THEME_KEY = 'agentsmon.theme'
 
 export const readTheme = (): Theme => {

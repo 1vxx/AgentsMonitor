@@ -126,6 +126,9 @@
 .cmdk svg { width: 14px; height: 14px; }
 .cmdk-label { min-width: 64px; text-align: left; }
 .cmdk kbd { background: var(--surface-hi); }
+/* The language: its short name in mono, sliding to the next one */
+.lang-btn { overflow: hidden; font: 600 12px/1 var(--mono); letter-spacing: 0.04em; }
+.lang-btn > span { display: grid; place-items: center; min-width: 18px; }
 
 /* ---------- Page ---------- */
 .content { max-width: 1600px; margin: 0 auto; padding: 44px 32px 48px; }

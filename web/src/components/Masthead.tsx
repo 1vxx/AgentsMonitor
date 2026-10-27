@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { duration } from '../format.ts'
+import { LOCALES, nextLocale, setLocale, useLocale, useT } from '../i18n/index.ts'
 import { TABS, isMac, type Tab, type Theme } from '../nav.ts'
 import { useLive } from '../store.ts'
 import { SearchIcon } from './bits.tsx'
@@ -24,8 +25,6 @@ const ThemeIcon = ({ theme }: { theme: Theme }) => (
   </svg>
 )
 
-const THEME_TITLE: Record<Theme, string> = { system: '跟随系统', dark: '深色', light: '浅色' }
-
 export const Masthead = ({
   tab,
   waiting,
@@ -44,6 +43,9 @@ export const Masthead = ({
   const conn = useLive(s => s.conn)
   const server = useLive(s => s.server)
   const mood = useLive(s => s.summary?.mood)
+  const t = useT()
+  const locale = useLocale()
+  const lang = LOCALES.find(l => l.id === locale)!
 
   return (
     <header className="masthead">
@@ -60,15 +62,15 @@ export const Masthead = ({
           <span className="brand-name">AgentsMonitor</span>
         </a>
 
-        <nav className="tabs" aria-label="视图">
-          {TABS.map((t, i) => (
-            <a key={t.id} href={`#${t.id}`} className={tab === t.id ? 'tab on' : 'tab'} aria-current={tab === t.id ? 'page' : undefined}>
-              {tab === t.id && <motion.span layoutId="tab-thumb" className="tab-thumb" transition={{ type: 'spring', stiffness: 460, damping: 38 }} />}
+        <nav className="tabs" aria-label={t('mast.views')}>
+          {TABS.map((v, i) => (
+            <a key={v.id} href={`#${v.id}`} className={tab === v.id ? 'tab on' : 'tab'} aria-current={tab === v.id ? 'page' : undefined}>
+              {tab === v.id && <motion.span layoutId="tab-thumb" className="tab-thumb" transition={{ type: 'spring', stiffness: 460, damping: 38 }} />}
               <span className="tab-idx" aria-hidden>
                 {String(i + 1).padStart(2, '0')}
               </span>
-              <span className="tab-label">{t.label}</span>
-              {t.id === 'live' && waiting > 0 && (
+              <span className="tab-label">{t(`tab.${v.id}`)}</span>
+              {v.id === 'live' && waiting > 0 && (
                 <motion.span className="badge" key={waiting} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 600, damping: 16 }}>
                   {waiting}
                 </motion.span>
@@ -78,11 +80,11 @@ export const Masthead = ({
         </nav>
 
         <div className="masthead-right">
-          <span className={`conn conn-${conn}`} title={conn === 'open' ? '实时连接中' : '正在重连守护进程'}>
+          <span className={`conn conn-${conn}`} title={t(conn === 'open' ? 'conn.liveTitle' : 'conn.retryTitle')}>
             <span className="conn-dot" />
             <AnimatePresence mode="wait" initial={false}>
               <motion.span
-                key={conn}
+                key={`${conn}${locale}`}
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
@@ -90,18 +92,34 @@ export const Masthead = ({
               >
                 {conn === 'open'
                   ? server
-                    ? `v${server.version} · 运行 ${duration(now - server.started_at).split(' ')[0]}`
-                    : '已连接'
-                  : conn === 'connecting'
-                    ? '连接中'
-                    : '已断开'}
+                    ? t('conn.uptime', { v: server.version, d: duration(now - server.started_at).split(' ')[0]! })
+                    : t('conn.open')
+                  : t(conn === 'connecting' ? 'conn.connecting' : 'conn.closed')}
               </motion.span>
             </AnimatePresence>
           </span>
-          <button className="cmdk" onClick={onPalette} aria-label="打开命令面板">
+          <button className="cmdk" onClick={onPalette} aria-label={t('mast.palette')}>
             <SearchIcon />
-            <span className="cmdk-label">搜索</span>
+            <span className="cmdk-label">{t('common.search')}</span>
             <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
+          <button
+            className="icon-btn lang-btn"
+            onClick={() => setLocale(nextLocale(locale))}
+            title={t('mast.language', { name: lang.label })}
+            aria-label={t('mast.toggleLanguage')}
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={locale}
+                initial={{ y: 8, opacity: 0, filter: 'blur(4px)' }}
+                animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
+                exit={{ y: -8, opacity: 0, filter: 'blur(4px)' }}
+                transition={{ duration: 0.22, ease: EASE }}
+              >
+                {lang.short}
+              </motion.span>
+            </AnimatePresence>
           </button>
           <button
             className="icon-btn"
@@ -109,8 +127,8 @@ export const Masthead = ({
               const r = e.currentTarget.getBoundingClientRect()
               onTheme({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
             }}
-            title={`主题：${THEME_TITLE[theme]}`}
-            aria-label="切换主题"
+            title={t('mast.theme', { name: t(`theme.${theme}`) })}
+            aria-label={t('mast.toggleTheme')}
           >
             <AnimatePresence mode="wait" initial={false}>
               <motion.span

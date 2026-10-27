@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from './api.ts'
 import { useLive } from './store.ts'
 import type { TokenReport, TokenSeries } from './types.ts'
+import type { Key } from './i18n/index.ts'
 
 const HOUR = 3_600_000
 const DAY = 86_400_000
@@ -18,21 +19,20 @@ export type RangeId = 'today' | '24h' | '7d' | '30d' | 'all'
 
 export interface Range {
   id: RangeId
-  label: string
   /** Start of the totals' window. */
   since: (now: number) => number
   /** Start and bucket of the chart. */
   seriesSince: (now: number) => number
   bucket: number
-  chartNote?: string
+  chartNote?: Key
 }
 
 export const RANGES: Range[] = [
-  { id: 'today', label: '今天', since: n => localMidnight(n), seriesSince: n => localMidnight(n), bucket: HOUR },
-  { id: '24h', label: '24 小时', since: n => n - DAY, seriesSince: n => Math.floor((n - DAY) / HOUR) * HOUR + HOUR, bucket: HOUR },
-  { id: '7d', label: '7 天', since: n => localMidnight(n, 6), seriesSince: n => localMidnight(n, 6), bucket: DAY },
-  { id: '30d', label: '30 天', since: n => localMidnight(n, 29), seriesSince: n => localMidnight(n, 29), bucket: DAY },
-  { id: 'all', label: '全部', since: () => 0, seriesSince: n => localMidnight(n, 89), bucket: DAY, chartNote: '图表显示近 90 天' },
+  { id: 'today', since: n => localMidnight(n), seriesSince: n => localMidnight(n), bucket: HOUR },
+  { id: '24h', since: n => n - DAY, seriesSince: n => Math.floor((n - DAY) / HOUR) * HOUR + HOUR, bucket: HOUR },
+  { id: '7d', since: n => localMidnight(n, 6), seriesSince: n => localMidnight(n, 6), bucket: DAY },
+  { id: '30d', since: n => localMidnight(n, 29), seriesSince: n => localMidnight(n, 29), bucket: DAY },
+  { id: 'all', since: () => 0, seriesSince: n => localMidnight(n, 89), bucket: DAY, chartNote: 'range.allNote' },
 ]
 
 /** Refetches when the window moves or new requests are counted. */

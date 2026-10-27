@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { agentInfo } from '../agents.ts'
 import { clock } from '../format.ts'
+import { rich, t, useT } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { Session, Status } from '../types.ts'
 import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
@@ -23,16 +24,19 @@ const URGENCY: Record<Status, number> = {
 const byUrgency = (a: Session, b: Session) =>
   Number(a.stale) - Number(b.stale) || URGENCY[b.status] - URGENCY[a.status] || a.status_since - b.status_since
 
-export const AgentFilter = ({ agents, value, onChange }: { agents: string[]; value: string; onChange: (a: string) => void }) =>
-  agents.length > 1 ? (
-    <Seg label="按代理筛选" value={value} onChange={onChange} options={[{ id: '', label: '全部' }, ...agents.map(a => ({ id: a, label: agentInfo(a).label }))]} />
+export const AgentFilter = ({ agents, value, onChange }: { agents: string[]; value: string; onChange: (a: string) => void }) => {
+  useT()
+  return agents.length > 1 ? (
+    <Seg label={t('live.filter')} value={value} onChange={onChange} options={[{ id: '', label: t('live.all') }, ...agents.map(a => ({ id: a, label: agentInfo(a).label }))]} />
   ) : null
+}
 
 /** The margin column: newest events slide in at the top and push the rest down. */
 const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
   const feed = useLive(s => s.feed)
   const sessions = useLive(s => s.sessions)
   const conn = useLive(s => s.conn)
+  useT()
   const first = useRef(true)
   const list = useRef<HTMLOListElement>(null)
   // Which ends have more above or below them, so they can fade out
@@ -51,17 +55,17 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
 
   // Headed like the sessions beside it, so both columns start on one line
   return (
-    <motion.aside className="live-side" aria-label="实时动态" {...rise(3)}>
+    <motion.aside className="live-side" aria-label={t('live.feed')} {...rise(3)}>
       <div className="section-head">
         <div className="section-lead">
           <span className="kicker">
             <b>03</b> Telemetry
           </span>
-          <h2 className="section-title">实时动态</h2>
+          <h2 className="section-title">{t('live.feed')}</h2>
         </div>
         <span className="feed-live">
           <span className={`live-dot conn-${conn}`} aria-hidden />
-          {conn === 'open' ? '实时' : '重连中'}
+          {t(conn === 'open' ? 'live.live' : 'live.reconnecting')}
         </span>
       </div>
       <div className={`live-feed${edge.top ? ' more-above' : ''}${edge.end ? ' more-below' : ''}`}>
@@ -94,7 +98,7 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
               </motion.li>
             )
           })}
-          {feed.length === 0 && <li className="tl-empty">等待事件…</li>}
+          {feed.length === 0 && <li className="tl-empty">{t('live.waiting')}</li>}
         </motion.ol>
       </div>
     </motion.aside>
@@ -103,6 +107,7 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
 
 export const LiveView = ({ now, onOpen }: { now: number; onOpen: (key: string) => void }) => {
   const sessions = useLive(s => s.sessions)
+  useT()
   const conn = useLive(s => s.conn)
   const [agent, setAgent] = useState('')
   const [showEnded, setShowEnded] = useState(false)
@@ -127,19 +132,17 @@ export const LiveView = ({ now, onOpen }: { now: number; onOpen: (key: string) =
               <b>02</b> Sessions in orbit
             </span>
             <h2 className="section-title">
-              活动会话 <Numeral className="count" value={live.length} />
+              {t('live.sessions')} <Numeral className="count" value={live.length} />
             </h2>
           </div>
           <AgentFilter agents={agents} value={agent} onChange={setAgent} />
         </motion.div>
         {live.length === 0 ? (
-          <Empty title={conn === 'open' ? '现在没有活动会话' : '守护进程未连接'}>
+          <Empty title={t(conn === 'open' ? 'live.none' : 'live.noDaemon')}>
             {conn === 'open' ? (
-              <>启动一个装有 agentsmon 插件的 Claude Code 会话，它会立刻出现在这里。</>
+              t('live.noneBody')
             ) : (
-              <>
-                先运行 <code>agentsmon serve</code>（或 <code>agentsmon service install</code>），页面会自动重连。
-              </>
+              rich(t('live.noDaemonBody'))
             )}
           </Empty>
         ) : (
@@ -158,7 +161,7 @@ export const LiveView = ({ now, onOpen }: { now: number; onOpen: (key: string) =
               <motion.svg viewBox="0 0 12 12" animate={{ rotate: showEnded ? 90 : 0 }} transition={{ duration: 0.3, ease: EASE }} aria-hidden>
                 <path d="M4 2.5 7.5 6 4 9.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </motion.svg>
-              最近结束 <span className="count">{ended.length}</span>
+              {t('live.ended')} <span className="count">{ended.length}</span>
             </button>
             <AnimatePresence initial={false}>
               {showEnded && (

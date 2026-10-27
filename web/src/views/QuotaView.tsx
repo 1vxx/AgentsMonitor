@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { agentInfo, windowLabel } from '../agents.ts'
 import { api } from '../api.ts'
 import { dateTime, pct, until } from '../format.ts'
+import { useT, type Key } from '../i18n/index.ts'
 import { useLive } from '../store.ts'
 import type { QuotaSample } from '../types.ts'
 import { AgentBadge, Empty, Seg } from '../components/bits.tsx'
@@ -10,14 +11,14 @@ import { Dial } from '../components/Dial.tsx'
 import { rise } from '../components/motion.tsx'
 import { QuotaChart } from '../components/QuotaChart.tsx'
 
-const RANGES = [
-  { id: 24, label: '24 小时' },
-  { id: 168, label: '7 天' },
-  { id: 720, label: '30 天' },
+const RANGES: readonly { id: number; name: Key }[] = [
+  { id: 24, name: 'range.24h' },
+  { id: 168, name: 'range.7d' },
+  { id: 720, name: 'range.30d' },
 ]
 const VIEWS = [
-  { id: 'chart', label: '图表' },
-  { id: 'table', label: '表格' },
+  { id: 'chart', name: 'qv.chart' },
+  { id: 'table', name: 'qv.table' },
 ] as const
 
 export const QuotaView = ({ now }: { now: number }) => {
@@ -27,6 +28,7 @@ export const QuotaView = ({ now }: { now: number }) => {
   const [view, setView] = useState<'chart' | 'table'>('chart')
   const asTable = view === 'table'
   const [error, setError] = useState<string>()
+  const t = useT()
 
   // Reload when the range changes or a new reading arrives
   const latest = useMemo(() => Math.max(0, ...[...quotas.values()].map(q => q.updated_at)), [quotas])
@@ -51,15 +53,15 @@ export const QuotaView = ({ now }: { now: number }) => {
           <span className="kicker">
             <b>02</b> Rate limits
           </span>
-          <h2 className="section-title">额度</h2>
+          <h2 className="section-title">{t('qv.title')}</h2>
         </div>
         <div className="toolbar">
-          <Seg label="时间范围" value={hours} onChange={setHours} options={RANGES} />
-          <Seg label="显示方式" value={view} onChange={setView} options={VIEWS} />
+          <Seg label={t('tok.range')} value={hours} onChange={setHours} options={RANGES.map(r => ({ id: r.id, label: t(r.name) }))} />
+          <Seg label={t('qv.view')} value={view} onChange={setView} options={VIEWS.map(v => ({ id: v.id, label: t(v.name) }))} />
         </div>
       </motion.div>
       {error && <div className="error">{error}</div>}
-      {agents.length === 0 && <Empty title="暂无额度数据">订阅账号的 5 小时 / 7 天额度会在会话收到回复后上报。</Empty>}
+      {agents.length === 0 && <Empty title={t('qv.empty')}>{t('qv.emptyBody')}</Empty>}
       {agents.map((agent, i) => {
         const q = quotas.get(agent)
         const mine = samples.filter(s => s.agent === agent)
@@ -67,7 +69,7 @@ export const QuotaView = ({ now }: { now: number }) => {
           <motion.section className="panel" key={agent} {...rise(i + 2)}>
             <div className="panel-head">
               <AgentBadge agent={agent} full />
-              {q && <span className="muted small">更新于 {dateTime(q.updated_at)}</span>}
+              {q && <span className="muted small">{t('qv.updated', { t: dateTime(q.updated_at) })}</span>}
             </div>
             {q && (
               <div className="dials dials-wide">
@@ -77,16 +79,16 @@ export const QuotaView = ({ now }: { now: number }) => {
               </div>
             )}
             {mine.length === 0 ? (
-              <div className="footnote">这个时间范围内没有读数。</div>
+              <div className="footnote">{t('qv.noReadings')}</div>
             ) : asTable ? (
               <div className="table-wrap">
                 <table className="table table-compact">
                   <thead>
                     <tr>
-                      <th>时间</th>
-                      <th>窗口</th>
-                      <th className="num">已用</th>
-                      <th>重置于</th>
+                      <th>{t('col.time')}</th>
+                      <th>{t('col.window')}</th>
+                      <th className="num">{t('col.used')}</th>
+                      <th>{t('col.resets')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -104,7 +106,7 @@ export const QuotaView = ({ now }: { now: number }) => {
             ) : (
               <QuotaChart samples={mine} from={from} to={to} />
             )}
-            <p className="footnote">{agentInfo(agent).label} 账号级额度：同一账号下所有会话共享。</p>
+            <p className="footnote">{t('qv.footnote', { agent: agentInfo(agent).label })}</p>
           </motion.section>
         )
       })}

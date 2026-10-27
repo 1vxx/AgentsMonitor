@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { agentInfo } from '../agents.ts'
 import { api } from '../api.ts'
 import { clock, compact, dateTime, duration, tildify, useNow } from '../format.ts'
+import { useT } from '../i18n/index.ts'
 import { onEvent, useLive } from '../store.ts'
 import type { EventRecord, Session } from '../types.ts'
 import { Icon, Meter, StatusPill, shortModel, shortTool, statusView } from './bits.tsx'
@@ -45,6 +46,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
   const [error, setError] = useState<string>()
   const panel = useRef<HTMLElement>(null)
   const now = useNow()
+  const t = useT()
   const s = live ?? stored
 
   useEffect(() => {
@@ -79,7 +81,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
   }, [])
 
   const forget = async () => {
-    if (!confirm('从监控中心删除这个会话及其历史事件？')) return
+    if (!confirm(t('drawer.forgetConfirm'))) return
     await api.forget(sessionKey).catch(e => setError(String(e)))
     onClose()
   }
@@ -99,7 +101,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
         className="drawer"
         role="dialog"
         aria-modal="true"
-        aria-label="会话详情"
+        aria-label={t('drawer.label')}
         onClick={e => e.stopPropagation()}
         initial={{ x: '104%' }}
         animate={{ x: 0 }}
@@ -112,11 +114,11 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
           <>
             <header className="drawer-head">
               <div className="drawer-title">
-                <div className="label">{agentInfo(s.agent).label} · 会话</div>
+                <div className="label">{t('drawer.kicker', { agent: agentInfo(s.agent).label })}</div>
                 <h2>{s.meta.project ?? s.session_id.slice(0, 8)}</h2>
                 <span className="drawer-path mono">{tildify(s.meta.cwd) ?? s.session_id}</span>
               </div>
-              <button className="icon-btn drawer-close" onClick={onClose} aria-label="关闭">
+              <button className="icon-btn drawer-close" onClick={onClose} aria-label={t('common.close')}>
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>
                   <path d="m4 4 8 8M12 4l-8 8" />
                 </svg>
@@ -136,7 +138,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
                     <Icon name={s.attention.kind === 'permission' ? 'alert' : 'ask'} />
                   </span>
                   <div className="callout-text">
-                    <strong>{s.attention.kind === 'permission' ? '等待你批准' : '等待你回答'}</strong>
+                    <strong>{t(s.attention.kind === 'permission' ? 'drawer.waitApprove' : 'drawer.waitAnswer')}</strong>
                     <div className="callout-line">
                       {s.attention.tool && <code className="tool">{shortTool(s.attention.tool)}</code>}
                       <span className="mono">{s.attention.subject ?? s.attention.message}</span>
@@ -146,30 +148,30 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
               )}
 
               <motion.section variants={part}>
-                <h4 className="sec-title">上下文</h4>
+                <h4 className="sec-title">{t('card.context')}</h4>
                 <Meter
                   value={s.context?.percent}
-                  label={s.context?.tokens !== undefined ? `${compact(s.context.tokens)} / ${compact(s.context.window ?? 0)} tokens` : '尚无读数'}
+                  label={s.context?.tokens !== undefined ? `${compact(s.context.tokens)} / ${compact(s.context.window ?? 0)} tokens` : t('drawer.noReading')}
                 />
               </motion.section>
 
               {(s.tools?.length ?? 0) + (s.subagents?.length ?? 0) > 0 && (
                 <motion.section variants={part}>
-                  <h4 className="sec-title">进行中</h4>
+                  <h4 className="sec-title">{t('drawer.inflight')}</h4>
                   <ul className="inflight">
-                    {s.tools?.map((t, i) => (
-                      <li key={t.id ?? i}>
+                    {s.tools?.map((tool, i) => (
+                      <li key={tool.id ?? i}>
                         <span className="ic ic-spin tone-active" aria-hidden />
-                        <code className="tool">{shortTool(t.tool)}</code>
-                        <span className="mono subject">{t.subject}</span>
-                        {t.agent_id && <span className="chip">子代理</span>}
-                        <span className="activity-time">{duration(now - t.started_at)}</span>
+                        <code className="tool">{shortTool(tool.tool)}</code>
+                        <span className="mono subject">{tool.subject}</span>
+                        {tool.agent_id && <span className="chip">{t('drawer.subagent')}</span>}
+                        <span className="activity-time">{duration(now - tool.started_at)}</span>
                       </li>
                     ))}
                     {s.subagents?.map(a => (
                       <li key={a.id}>
                         <span className="ic ic-pulse tone-active" aria-hidden />
-                        <span className="chip">子代理</span>
+                        <span className="chip">{t('drawer.subagent')}</span>
                         <span className="subject">{a.preview ?? a.id}</span>
                         <span className="activity-time">{duration(now - a.started_at)}</span>
                       </li>
@@ -180,51 +182,51 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
 
               {s.last_prompt && (
                 <motion.section variants={part}>
-                  <h4 className="sec-title">最近的提示</h4>
+                  <h4 className="sec-title">{t('drawer.lastPrompt')}</h4>
                   <blockquote className="quote">{s.last_prompt}</blockquote>
                 </motion.section>
               )}
               {s.last_turn?.preview && (
                 <motion.section variants={part}>
-                  <h4 className="sec-title">最近的回复</h4>
+                  <h4 className="sec-title">{t('drawer.lastReply')}</h4>
                   <blockquote className="quote quote-answer">{s.last_turn.preview}</blockquote>
                 </motion.section>
               )}
 
               <motion.section variants={part}>
                 <h4 className="sec-title">
-                  统计 <span className="h4-note">{s.stats.exact_tokens ? 'tokens 为逐请求精确计数' : 'tokens 按回合估算（未接入精确计数）'}</span>
+                  {t('drawer.stats')} <span className="h4-note">{t(s.stats.exact_tokens ? 'drawer.exact' : 'drawer.estimate')}</span>
                 </h4>
                 <dl className="grid-stats grid-stats-4">
-                  <Fact label="提示"><Num v={s.stats.prompts} /></Fact>
-                  <Fact label="回合"><Num v={s.stats.turns} /></Fact>
-                  <Fact label="工具调用"><Num v={s.stats.tool_calls} /></Fact>
-                  <Fact label="工具失败"><Num v={s.stats.tool_errors} /></Fact>
-                  <Fact label="子代理"><Num v={s.stats.subagent_runs} /></Fact>
-                  <Fact label="出错回合"><Num v={s.stats.errors} /></Fact>
-                  <Fact label="输入 tokens"><Num v={s.stats.input_tokens} /></Fact>
-                  <Fact label="输出 tokens"><Num v={s.stats.output_tokens} /></Fact>
-                  <Fact label="缓存读"><Num v={s.stats.cache_read_tokens} /></Fact>
-                  <Fact label="缓存写"><Num v={s.stats.cache_write_tokens} /></Fact>
-                  <Fact label="工作时长">{duration(s.stats.busy_ms)}</Fact>
-                  <Fact label="模型请求">{s.stats.exact_tokens ? <Num v={s.stats.api_requests ?? 0} /> : '—'}</Fact>
+                  <Fact label={t('fact.prompts')}><Num v={s.stats.prompts} /></Fact>
+                  <Fact label={t('fact.turns')}><Num v={s.stats.turns} /></Fact>
+                  <Fact label={t('fact.toolCalls')}><Num v={s.stats.tool_calls} /></Fact>
+                  <Fact label={t('fact.toolErrors')}><Num v={s.stats.tool_errors} /></Fact>
+                  <Fact label={t('fact.subagents')}><Num v={s.stats.subagent_runs} /></Fact>
+                  <Fact label={t('fact.errors')}><Num v={s.stats.errors} /></Fact>
+                  <Fact label={t('fact.input')}><Num v={s.stats.input_tokens} /></Fact>
+                  <Fact label={t('fact.output')}><Num v={s.stats.output_tokens} /></Fact>
+                  <Fact label={t('fact.cacheRead')}><Num v={s.stats.cache_read_tokens} /></Fact>
+                  <Fact label={t('fact.cacheWrite')}><Num v={s.stats.cache_write_tokens} /></Fact>
+                  <Fact label={t('fact.busy')}>{duration(s.stats.busy_ms)}</Fact>
+                  <Fact label={t('fact.requests')}>{s.stats.exact_tokens ? <Num v={s.stats.api_requests ?? 0} /> : '—'}</Fact>
                 </dl>
               </motion.section>
 
               <motion.section variants={part}>
-                <h4 className="sec-title">会话</h4>
+                <h4 className="sec-title">{t('drawer.session')}</h4>
                 <dl className="facts">
-                  <Fact label="目录" mono>
+                  <Fact label={t('fact.dir')} mono>
                     {tildify(s.meta.cwd)}
                   </Fact>
-                  <Fact label="模型">{shortModel(s.meta.model)}</Fact>
-                  <Fact label="权限模式">{s.meta.permission_mode}</Fact>
-                  <Fact label="界面">{s.meta.surface}</Fact>
-                  <Fact label="版本">{s.meta.agent_version}</Fact>
-                  <Fact label="开始">{dateTime(s.started_at)}</Fact>
-                  <Fact label="最后信号">{dateTime(s.last_seen)}</Fact>
-                  {s.ended_at && <Fact label="结束">{`${dateTime(s.ended_at)} · ${s.end_reason ?? ''}`}</Fact>}
-                  <Fact label="会话 ID" mono>
+                  <Fact label={t('fact.model')}>{shortModel(s.meta.model)}</Fact>
+                  <Fact label={t('fact.permission')}>{s.meta.permission_mode}</Fact>
+                  <Fact label={t('fact.surface')}>{s.meta.surface}</Fact>
+                  <Fact label={t('fact.version')}>{s.meta.agent_version}</Fact>
+                  <Fact label={t('fact.started')}>{dateTime(s.started_at)}</Fact>
+                  <Fact label={t('fact.lastSeen')}>{dateTime(s.last_seen)}</Fact>
+                  {s.ended_at && <Fact label={t('fact.ended')}>{`${dateTime(s.ended_at)} · ${s.end_reason ?? ''}`}</Fact>}
+                  <Fact label={t('fact.sessionId')} mono>
                     {s.session_id}
                   </Fact>
                 </dl>
@@ -232,7 +234,7 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
 
               <motion.section variants={part}>
                 <h4 className="sec-title">
-                  时间线 <span className="h4-note">{events.length > 0 && `${events.length} 条`}</span>
+                  {t('drawer.timeline')} <span className="h4-note">{events.length > 0 && t('drawer.count', { n: events.length })}</span>
                 </h4>
                 {error && <div className="error">{error}</div>}
                 <ol className="timeline">
@@ -249,13 +251,13 @@ export const SessionDrawer = ({ sessionKey, onClose }: { sessionKey: string; onC
                       </li>
                     )
                   })}
-                  {events.length === 0 && !error && <li className="tl-empty">还没有事件</li>}
+                  {events.length === 0 && !error && <li className="tl-empty">{t('drawer.noEvents')}</li>}
                 </ol>
               </motion.section>
 
               <motion.div variants={part}>
                 <button className="btn btn-danger" onClick={forget}>
-                  删除此会话
+                  {t('drawer.forget')}
                 </button>
               </motion.div>
             </motion.div>

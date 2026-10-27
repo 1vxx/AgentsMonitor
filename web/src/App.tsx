@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useNow } from './format.ts'
 import { TABS, applyTheme, isMac, nextTheme, readTheme, tabFromHash, type Tab, type Theme } from './nav.ts'
+import { t, useLocale } from './i18n/index.ts'
 import { useLive } from './store.ts'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { Cosmos } from './components/Cosmos.tsx'
@@ -27,6 +28,7 @@ export const App = () => {
   const now = useNow()
   const waiting = useLive(s => s.summary?.counts.waiting ?? 0)
   const mood = useLive(s => s.summary?.mood ?? 'offline')
+  const locale = useLocale()
   useSpotlight()
 
   useEffect(() => {
@@ -38,8 +40,8 @@ export const App = () => {
   useEffect(() => applyTheme(theme), [theme])
 
   useEffect(() => {
-    document.title = waiting > 0 ? `(${waiting}) 等待你 · AgentsMonitor` : 'AgentsMonitor'
-  }, [waiting])
+    document.title = waiting > 0 ? t('app.titleWaiting', { n: waiting }) : 'AgentsMonitor'
+  }, [waiting, locale])
 
   /** Switches the theme; from the toggle, the new one spreads out from it like ink. */
   const changeTheme = useCallback((next: Theme, at?: { x: number; y: number }) => {
@@ -128,12 +130,12 @@ export const App = () => {
 
         <footer className="footer">
           <span className="footer-mark">AgentsMonitor</span>
-          <span>数据只保存在这台电脑上</span>
+          <span>{t('footer.local')}</span>
           <span className="footer-math" aria-hidden>
             T² ∝ a³ · ∮ dt
           </span>
           <span className="footer-keys">
-            <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd> 搜索 <kbd>1</kbd>–<kbd>5</kbd> 切换视图 <kbd>esc</kbd> 关闭
+            <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd> {t('footer.search')} <kbd>1</kbd>–<kbd>5</kbd> {t('footer.views')} <kbd>esc</kbd> {t('footer.close')}
           </span>
         </footer>
 

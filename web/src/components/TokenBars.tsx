@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { compact } from '../format.ts'
+import { dateLocale, useT } from '../i18n/index.ts'
 import { tokenTotal, type TokenSeries, type TokenTotals } from '../types.ts'
 
 // One bar per bucket for the chosen measure; hovering a bucket shows all of
@@ -7,13 +8,8 @@ import { tokenTotal, type TokenSeries, type TokenTotals } from '../types.ts'
 
 export type Measure = 'total' | 'input' | 'output' | 'cache_read' | 'cache_write'
 
-export const MEASURES: { id: Measure; label: string }[] = [
-  { id: 'total', label: '合计' },
-  { id: 'output', label: '输出' },
-  { id: 'input', label: '输入' },
-  { id: 'cache_read', label: '缓存读取' },
-  { id: 'cache_write', label: '缓存写入' },
-]
+// Named in the dictionaries under measure.<id>
+export const MEASURES: readonly Measure[] = ['total', 'output', 'input', 'cache_read', 'cache_write']
 
 const value = (t: TokenTotals, m: Measure) => (m === 'total' ? tokenTotal(t) : t[m])
 
@@ -31,8 +27,8 @@ const niceMax = (v: number) => {
 const bucketLabel = (t: number, bucket: number) => {
   const d = new Date(t)
   return bucket < 86_400_000
-    ? d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+    ? d.toLocaleTimeString(dateLocale(), { hour12: false, hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(dateLocale(), { month: '2-digit', day: '2-digit' })
 }
 
 export const TokenBars = ({ series, until, measure }: { series: TokenSeries; until: number; measure: Measure }) => {
@@ -40,6 +36,7 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
   const [width, setWidth] = useState(720)
   const [hover, setHover] = useState<number>()
   const grad = `bars${useId().replace(/:/g, '')}`
+  const t = useT()
 
   useLayoutEffect(() => {
     const el = box.current
@@ -70,7 +67,7 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
 
   return (
     <div className="chart" ref={box}>
-      <svg width={width} height={HEIGHT} role="img" aria-label="tokens 随时间分布" style={{ ['--bar' as string]: `url(#${grad})` }}>
+      <svg width={width} height={HEIGHT} role="img" aria-label={t('chart.tokens')} style={{ ['--bar' as string]: `url(#${grad})` }}>
         <defs>
           <linearGradient id={grad} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="var(--ion-2)" />
@@ -131,16 +128,16 @@ export const TokenBars = ({ series, until, measure }: { series: TokenSeries; unt
           }}
         >
           <div className="tooltip-title">
-            {new Date(h.t).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            {new Date(h.t).toLocaleString(dateLocale(), { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
           </div>
           {MEASURES.map(m => (
-            <div key={m.id} className="tooltip-row">
-              <span>{m.label}</span>
-              <strong>{value(h.totals, m.id).toLocaleString()}</strong>
+            <div key={m} className="tooltip-row">
+              <span>{t(`measure.${m}`)}</span>
+              <strong>{value(h.totals, m).toLocaleString(dateLocale())}</strong>
             </div>
           ))}
           <div className="tooltip-row">
-            <span>请求</span>
+            <span>{t('chart.requests')}</span>
             <strong>{h.totals.requests}</strong>
           </div>
         </div>

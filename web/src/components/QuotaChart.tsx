@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { windowLabel } from '../agents.ts'
 import { dateTime, pct } from '../format.ts'
+import { useT } from '../i18n/index.ts'
 import type { QuotaSample } from '../types.ts'
 import { EASE_IN_OUT } from './motion.tsx'
 
@@ -34,6 +35,7 @@ export const QuotaChart = ({ samples, from, to }: { samples: QuotaSample[]; from
   const box = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(720)
   const [hover, setHover] = useState<number>()
+  const t = useT()
 
   useLayoutEffect(() => {
     const el = box.current
@@ -115,7 +117,7 @@ export const QuotaChart = ({ samples, from, to }: { samples: QuotaSample[]; from
           ))}
         </div>
       )}
-      <svg width={width} height={HEIGHT} role="img" aria-label="额度使用随时间变化">
+      <svg width={width} height={HEIGHT} role="img" aria-label={t('chart.quota')}>
         {[0, 25, 50, 75, 100].map(v => (
           <g key={v}>
             <line className={v === 0 ? 'axis' : 'grid'} x1={PAD.left} x2={PAD.left + innerW} y1={y(v)} y2={y(v)} />
