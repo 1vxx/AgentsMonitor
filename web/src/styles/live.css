@@ -346,7 +346,30 @@
   overflow: hidden;
 }
 .feed-live { display: inline-flex; align-items: center; gap: 7px; padding-bottom: 6px; color: var(--text-3); font: 500 11px var(--mono); letter-spacing: 0.14em; }
-.feed { position: relative; flex: 1 1 auto; min-height: 0; list-style: none; margin: 0; padding: 10px 8px; overflow-y: auto; overscroll-behavior: contain; }
+/* A hairline scrollbar in ion that shows itself on hover; where there is
+   more above or below, the log fades out at that edge */
+@property --fade-top { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --fade-end { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.live-feed { transition: --fade-top var(--dur) var(--ease-out), --fade-end var(--dur) var(--ease-out); }
+.live-feed.more-above { --fade-top: 36px; }
+.live-feed.more-below { --fade-end: 44px; }
+.feed {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  list-style: none;
+  margin: 0;
+  padding: 10px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+  mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-end)), transparent);
+  -webkit-mask-image: linear-gradient(transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-end)), transparent);
+  transition: scrollbar-color var(--dur);
+}
+.live-feed:hover .feed, .feed:focus-within { scrollbar-color: color-mix(in srgb, var(--ion) 50%, transparent) transparent; }
 .feed-row {
   position: relative;
   display: grid;

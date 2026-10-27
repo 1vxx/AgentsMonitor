@@ -34,9 +34,20 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
   const sessions = useLive(s => s.sessions)
   const conn = useLive(s => s.conn)
   const first = useRef(true)
+  const list = useRef<HTMLOListElement>(null)
+  // Which ends have more above or below them, so they can fade out
+  const [edge, setEdge] = useState({ top: false, end: false })
+  const measure = () => {
+    const el = list.current
+    if (!el) return
+    const top = el.scrollTop > 4
+    const end = el.scrollTop + el.clientHeight < el.scrollHeight - 4
+    setEdge(e => (e.top === top && e.end === end ? e : { top, end }))
+  }
   useEffect(() => {
     first.current = false
   }, [])
+  useEffect(measure, [feed])
 
   // Headed like the sessions beside it, so both columns start on one line
   return (
@@ -53,8 +64,8 @@ const Feed = ({ onOpen }: { onOpen: (key: string) => void }) => {
           {conn === 'open' ? '实时' : '重连中'}
         </span>
       </div>
-      <div className="live-feed">
-        <motion.ol className="feed" layoutScroll>
+      <div className={`live-feed${edge.top ? ' more-above' : ''}${edge.end ? ' more-below' : ''}`}>
+        <motion.ol ref={list} className="feed" layoutScroll onScroll={measure}>
           {feed.slice(0, 80).map((r, i) => {
             const d = describe(r)
             const s = sessions.get(r.key)

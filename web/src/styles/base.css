@@ -289,6 +289,12 @@ kbd {
   background: color-mix(in srgb, var(--agent) 12%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent) 28%, transparent);
 }
+/* A product's own mark on its own tile: Claude's clay spark on cream */
+.agent-logo {
+  background: linear-gradient(150deg, #fdfbf6, #f1ebdf);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.22), 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.agent-logo svg { width: 62%; height: 62%; fill: #d97757; }
 .agent-name { font-size: 14px; font-weight: 500; }
 .chip {
   display: inline-flex;
