@@ -283,11 +283,12 @@ Storage stays bounded. Deleted space returns to the file system right away (incr
 
 | Data | Kept |
 | --- | --- |
-| Ended sessions and their events | 30 days after they end |
+| Ended sessions | 7 days after they end |
 | Sessions deleted in Claude Code (in the app, or by its `cleanupPeriodDays` cleanup) | Removed within 15 s, running or ended |
 | Sessions archived in Claude Desktop | Removed from the live view within 15 s; kept in History until retention ends. Unarchived and resumed, they return with their statistics |
 | Codex sessions deleted or archived in Codex | The same, read from Codex's thread records (`~/.codex/state_<n>.sqlite`) |
-| Event history, rate-limit readings | 30 days |
+| Event history | 3 days |
+| Rate-limit readings | 30 days |
 | Token counts | Per request for 90 days, then per hour until 400 days, then per day until 5 years. Totals stay exact at every step |
 
 Removing a session never removes its token counts, and neither does Claude Code deleting its transcript: what was counted stays in the ledger.

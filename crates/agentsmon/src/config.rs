@@ -49,9 +49,9 @@ pub struct Retention {
 impl Default for Retention {
     fn default() -> Retention {
         Retention {
-            sessions_days: 30,
+            sessions_days: 7,
             follow_transcripts: true,
-            events_days: 30,
+            events_days: 3,
             quota_days: 30,
             token_detail_days: 90,
             token_hourly_days: 400,
@@ -234,13 +234,14 @@ pub const EXAMPLE: &str = r#"# ~/.agentsmon/config.toml — every field is optio
 # path = "~/.agentsmon/agentsmon.db"
 
 [retention]
-# Ended sessions and their events are forgotten this many days after they end.
-# sessions_days = 30
+# Ended sessions are forgotten this many days after they end, with any events
+# still kept; events_days prunes events on its own, whatever their session.
+# sessions_days = 7
 # Forget a session, running or ended, once Claude Code deletes its transcript
 # (deleting it in the app, or the cleanupPeriodDays sweep). Sessions archived
 # in Claude Desktop always leave the live view and stay in the history.
 # follow_transcripts = true
-# events_days = 30
+# events_days = 3
 # quota_days = 30
 # Token counts are kept per request, then per hour, then per day. Totals stay
 # exact at each step; a time window is exact to the request, the hour or the

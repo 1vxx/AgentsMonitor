@@ -296,7 +296,7 @@ mod tests {
     fn cutoffs_follow_the_retention() {
         let r = Retention::default();
         let c = cutoffs(1000 * DAY_MS, &r);
-        assert_eq!(c.events, (1000 - 30) * DAY_MS);
+        assert_eq!(c.events, (1000 - 3) * DAY_MS);
         assert_eq!(c.token_detail, (1000 - 90) * DAY_MS);
         assert_eq!(c.token_daily, (1000 - 1825) * DAY_MS);
     }
