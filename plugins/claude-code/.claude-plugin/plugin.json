@@ -1,0 +1,22 @@
+{
+  "name": "agentsmon",
+  "version": "0.1.0",
+  "description": "Streams this session's status, tools, usage and rate limits to the local agentsmon daemon",
+  "author": { "name": "1v" },
+  "license": "MIT",
+  "userConfig": {
+    "detail": {
+      "type": "string",
+      "title": "Text sent to the monitor",
+      "description": "preview: the start of prompts and answers and what each tool works on; none: statuses and numbers only",
+      "options": ["preview", "none"],
+      "default": "preview"
+    },
+    "socket": {
+      "type": "string",
+      "title": "Daemon socket",
+      "description": "Unix socket of the agentsmon daemon; empty for $AGENTSMON_SOCKET or ~/.agentsmon/agentsmon.sock",
+      "default": ""
+    }
+  }
+}

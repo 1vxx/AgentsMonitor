@@ -1,0 +1,14 @@
+{
+  "name": "agentsmon",
+  "owner": {
+    "name": "1v"
+  },
+  "description": "AgentsMonitor integrations for coding agents",
+  "plugins": [
+    {
+      "name": "agentsmon",
+      "source": "./plugins/claude-code",
+      "description": "Streams Claude Code session status, tools, usage and rate limits to the local agentsmon daemon"
+    }
+  ]
+}
