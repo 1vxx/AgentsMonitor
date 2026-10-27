@@ -3,7 +3,7 @@
 //! the ingest path only ever pushes onto a channel; reads use their own
 //! connection (WAL lets them run beside the writer).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -87,11 +87,12 @@ CREATE TABLE IF NOT EXISTS token_daily (
     PRIMARY KEY (day, agent, model, source)
 );
 -- How much of each agent log file a collector has counted, so its requests
--- count once across restarts.
+-- count once across restarts, and how the file is known again (tail::Head).
 CREATE TABLE IF NOT EXISTS log_cursors (
     name TEXT PRIMARY KEY,
     offset INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    head TEXT
 );
 ";
 
@@ -130,8 +131,8 @@ pub enum Op {
     /// Sets the title of a stored session that is not in memory.
     Title { key: String, title: String },
     Usage(UsageRecord),
-    /// How far a log file has been counted.
-    Cursor { name: String, offset: u64, ts: i64 },
+    /// How far a log file has been counted, and its head.
+    Cursor { name: String, offset: u64, head: Option<String>, ts: i64 },
     /// Prunes and folds by the cut-offs, then gives the space back to the
     /// file system.
     Maintain(Cutoffs),
@@ -163,6 +164,10 @@ impl Store {
         writer.pragma_update(None, "synchronous", "NORMAL")?;
         writer.pragma_update(None, "journal_size_limit", 4 * 1024 * 1024)?;
         writer.execute_batch(SCHEMA)?;
+        // Cursors kept before files were known by their heads.
+        if !writer.prepare("SELECT 1 FROM pragma_table_info('log_cursors') WHERE name = 'head'")?.exists([])? {
+            writer.execute_batch("ALTER TABLE log_cursors ADD COLUMN head TEXT")?;
+        }
         let reader = Connection::open(path)?;
         reader.pragma_update(None, "query_only", true)?;
 
@@ -284,9 +289,9 @@ fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
                 ])?;
             }
             Op::Title { key, title } => titles.push((key, title)),
-            Op::Cursor { name, offset, ts } => {
-                tx.prepare_cached("INSERT OR REPLACE INTO log_cursors (name, offset, updated_at) VALUES (?1, ?2, ?3)")?
-                    .execute(params![name, offset as i64, ts])?;
+            Op::Cursor { name, offset, head, ts } => {
+                tx.prepare_cached("INSERT OR REPLACE INTO log_cursors (name, offset, updated_at, head) VALUES (?1, ?2, ?3, ?4)")?
+                    .execute(params![name, offset as i64, ts, head])?;
             }
             Op::Flush(_) => {}
             Op::Maintain(c) => {
@@ -541,10 +546,23 @@ pub fn untitled_sessions(c: &Connection) -> rusqlite::Result<Vec<(String, String
     stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
 }
 
-/// How far each log file a collector reads has been counted.
-pub fn log_cursors(c: &Connection) -> rusqlite::Result<Vec<(String, u64)>> {
-    let mut stmt = c.prepare("SELECT name, offset FROM log_cursors")?;
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?.collect()
+/// How far each log file a collector reads has been counted, and its head.
+pub fn log_cursors(c: &Connection) -> rusqlite::Result<Vec<(String, u64, Option<String>)>> {
+    let mut stmt = c.prepare("SELECT name, offset, head FROM log_cursors")?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get(2)?)))?.collect()
+}
+
+/// Which of `ids` the ledger holds already.
+pub fn known_requests(c: &Connection, ids: &[String]) -> rusqlite::Result<HashSet<String>> {
+    let mut known = HashSet::new();
+    for part in ids.chunks(500) {
+        let marks = vec!["?"; part.len()].join(",");
+        let mut stmt = c.prepare(&format!("SELECT request_id FROM token_usage WHERE request_id IN ({marks})"))?;
+        for id in stmt.query_map(rusqlite::params_from_iter(part), |r| r.get(0))? {
+            known.insert(id?);
+        }
+    }
+    Ok(known)
 }
 
 /// Request ids counted since `since`, so a delivery repeated across a

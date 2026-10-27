@@ -2,6 +2,7 @@
 
 mod adapters;
 mod api;
+mod claude;
 mod client;
 mod codex;
 mod config;
@@ -14,6 +15,7 @@ mod service;
 mod store;
 mod summary;
 mod sys;
+mod tail;
 mod titles;
 mod util;
 
@@ -265,6 +267,34 @@ async fn run(cfg: Config) -> Result<(), String> {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!("codex collector stopped: {e}");
+                    return;
+                }
+            };
+        }
+    });
+
+    // Claude Code's token counts from its transcripts, and its account's
+    // usage limits.
+    let claude_hub = hub.clone();
+    let refresh = cfg.claude_refresh.clone();
+    tokio::spawn(async move {
+        let mut readers = (claude::Transcripts::new(), claude::Limits::new(refresh));
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let hub = claude_hub.clone();
+            readers = match tokio::task::spawn_blocking(move || {
+                let (mut transcripts, mut limits) = readers;
+                transcripts.pass(&hub);
+                limits.pass(&hub, transcripts.active_at);
+                (transcripts, limits)
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("claude collector stopped: {e}");
                     return;
                 }
             };

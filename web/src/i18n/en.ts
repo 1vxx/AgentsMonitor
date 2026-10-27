@@ -184,7 +184,7 @@ export const en = {
   'drawer.lastReply': 'Last reply',
   'drawer.stats': 'Stats',
   'drawer.exact': 'tokens are counted per request',
-  'drawer.estimate': 'tokens are estimated per turn (exact counts not set up)',
+  'drawer.estimate': 'tokens are estimated per turn (no per-request counts read for this session)',
   'drawer.session': 'Session',
   'drawer.timeline': 'Timeline',
   'drawer.count': (p => `${p.n} ${plural(p.n, 'event', 'events')}`) as Message,
@@ -272,11 +272,11 @@ export const en = {
   'tok.gotExportsBody':
     'The daemon has received {n} OpenTelemetry exports (services: {services}), none with an <code>api_request</code> record yet. Send a message in a session and counts appear here within seconds.',
   'tok.unnamed': 'unnamed',
-  'tok.noExports': 'No usage reports from Claude Code yet',
+  'tok.noExports': 'No model requests counted yet',
   'tok.noExportsBody':
-    'In the <code>env</code> block of <code>~/.claude/settings.json</code>, set <code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>, <code>OTEL_LOGS_EXPORTER=otlp</code>, <code>OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json</code> and <code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:7788/v1/logs</code>. Only sessions started afterwards pick it up: open a new <code>claude</code> in the terminal, and quit the desktop app fully before reopening it.',
+    'Claude Code\'s requests are read from its transcripts in <code>~/.claude/projects</code>, Codex\'s from its session logs in <code>~/.codex/sessions</code>. Send a message in a session and counts appear here within seconds.',
   'tok.footnote':
-    'Each model request is counted once (deduplicated by request ID): Claude Code\'s from the usage it reports itself, Codex\'s from its session logs. The main session, subagents, context compaction and background requests are all included.',
+    'Each model request is counted once (deduplicated by request ID), from the agents\' own files: Claude Code\'s transcripts and Codex\'s session logs. Claude Code\'s context compaction and its small model\'s web search, web fetch and titles write nothing to the transcript; they are counted only when Claude Code exports its OpenTelemetry to the daemon.',
   'tok.lastRequest': ' Last request: {t}.',
   'src.repl_main_thread': 'Main session',
   'src.main': 'Main session',

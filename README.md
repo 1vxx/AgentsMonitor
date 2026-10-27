@@ -6,7 +6,8 @@ Claude Code and Codex are supported. Other agents each need only an adapter and 
 
 ```
 Claude Code ──(plugin, in-process hooks)──┐
-Claude Code ──(OpenTelemetry token counts)─┤   Unix socket / 127.0.0.1:7788
+Claude Code ──(transcripts, usage limits)──┤   read by the daemon
+Claude Code ──(OpenTelemetry, optional)────┤   Unix socket / 127.0.0.1:7788
 Codex ──(plugin, agentsmon hook)───────────┤
 Codex ──(rollout logs, read by the daemon)─┤
                                            ▼
@@ -99,9 +100,14 @@ codex plugin add agentsmon@agentsmon
 
 Restart Codex, then trust the plugin's hooks with `/hooks` in the CLI or the hook review controls in the Codex app; Codex skips hooks that are not trusted. The hooks run `agentsmon`, so it must be in `~/.cargo/bin` (where `cargo install` puts it), `/opt/homebrew/bin`, `/usr/local/bin` or on Codex's `PATH`. See [plugins/codex](plugins/codex/README.md).
 
-### 3. Enable exact token counts
+### 3. Token counts and usage limits
 
-Token counts come from Claude Code's own per-request telemetry. Add the following to the `env` block of `~/.claude/settings.json`:
+Nothing to set up. The daemon reads every model request's token counts from the agents' own files, including requests made while it was down:
+
+- **Claude Code**: its transcripts (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), where every reply of the main session and of its subagents is written with its request id and token counts. The account's five-hour and weekly limits come from the reading Claude Code keeps in `~/.claude.json`. Claude Code fetches that reading only for `/usage`, so while it is at work and no reading is newer than 10 min, the daemon runs `claude -p /usage`, which asks no model and keeps no session. The plugin reports fresher limits after every turn; with it installed, the daemon has nothing to fetch. `[claude] usage_refresh_minutes` in the config file changes the interval, and `0` turns it off.
+- **Codex**: its session logs (`~/.codex/sessions`, or `$CODEX_HOME/sessions`), which also give the context fill and the rate limits.
+
+Some of Claude Code's requests write nothing to the transcript: context compaction, and the small model's web search, web fetch and session titles. To count those as well, have Claude Code export its telemetry to the daemon, in the `env` block of `~/.claude/settings.json`:
 
 ```json
 "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
@@ -111,9 +117,7 @@ Token counts come from Claude Code's own per-request telemetry. Add the followin
 "OTEL_LOGS_EXPORT_INTERVAL": "2000"
 ```
 
-The exporter sends only to the local daemon. Counting starts with sessions started after the change; quit and reopen Claude Desktop for it to apply there. Requests made while the daemon is down cannot be counted later, so keep it running (`agentsmon service install`). Without this setting, token figures are estimates summed from turn ends and are marked `≈`.
-
-Codex needs no setting: the daemon reads every request's token counts, the context fill and the rate limits from Codex's session logs (`~/.codex/sessions`, or `$CODEX_HOME/sessions`), including requests made while it was down.
+The exporter sends only to the local daemon, and applies to sessions started after the change (quit and reopen Claude Desktop). A request both sources report counts once, by its request id. Where a session's transcript cannot be read, its token figures are estimates summed from turn ends, marked `≈`.
 
 ### 4. Open the dashboard
 
@@ -189,9 +193,11 @@ Storage stays bounded. Deleted space returns to the file system right away (incr
 | Event history, rate-limit readings | 30 days |
 | Token counts | Per request for 90 days, then per hour until 400 days, then per day until 5 years. Totals stay exact at every step |
 
+Removing a session never removes its token counts, and neither does Claude Code deleting its transcript: what was counted stays in the ledger.
+
 The daemon checks for deletions and archiving every 15 s and applies retention at start and every 10 min. The Daemon view can run a pass on demand, or remove every ended session at once; token totals are never reduced. All periods can be changed under `[retention]` in the config file.
 
-Archive state is read from Claude Desktop's own session records (`~/Library/Application Support/Claude/claude-code-sessions/`). That format is not public: the daemon only reads it, and if it cannot, archived sessions simply follow the retention period. Codex's thread records and session logs are not public either and are handled the same way.
+Archive state is read from Claude Desktop's own session records (`~/Library/Application Support/Claude/claude-code-sessions/`). That format is not public: the daemon only reads it, and if it cannot, archived sessions simply follow the retention period. Claude Code's transcripts and `~/.claude.json`, and Codex's thread records and session logs, are not public either and are handled the same way.
 
 ## Security and privacy
 
@@ -200,7 +206,8 @@ Archive state is read from Claude Desktop's own session records (`~/Library/Appl
 - Requests from browsers are accepted only from loopback origins and `http.allowed_origins`, so other web pages cannot read sessions or inject events.
 - With `detail = none`, the plugin sends no prompt, answer or command text.
 - The Codex plugin forwards each hook payload whole over the socket; the daemon keeps only the start of prompts and answers and what each tool works on.
-- Telemetry goes only to the local daemon, which keeps the per-request token counts and discards every other record.
+- The daemon reads the agents' transcripts and logs only for token counts, titles and limits, and parses only the lines that hold them. Of `~/.claude.json` it keeps only the usage-limit reading.
+- Telemetry, when turned on, goes only to the local daemon, which keeps the per-request token counts and discards every other record.
 
 ## Performance
 
@@ -210,7 +217,7 @@ The monitor must never slow an agent down:
 - The daemon runs on one thread. Each event is a microsecond-scale reducer step. Every change is serialized once and shared by all WebSocket clients, and SQLite writes are batched on a separate thread. Measured: 7.4 MB resident memory and 0.27 s total CPU after 2,300 batches.
 - Memory is bounded: live sessions plus those ended in the last 24 h, and at most 50,000 request ids (6 h) for deduplication.
 - `agentsmon hook`, which the Codex plugin and other command-hook agents use, forwards stdin without parsing it or starting an async runtime: about 5 ms per event, mostly process start-up.
-- Codex's session logs are read every 2 s, only what each file gained, and only lines that name a token or session record are parsed.
+- Claude Code's transcripts and Codex's session logs are read every 2 s, only what each file gained, and only lines that name a reply, a token or a session record are parsed. Files not written to for a day are looked at once a minute, and a folder is listed again only when it changed. Files are read through a 64 KB buffer, so memory does not grow with them. Measured with 730 transcripts (845 MB): the first run counts their 12,000 requests in 0.9 s of CPU with a 26 MB peak; after that, reading them costs about 20 ms of CPU a minute.
 
 ## Development
 
@@ -232,7 +239,7 @@ In Claude Desktop, the `dashboard` entry in `.claude/launch.json` previews the d
 
 - [x] Daemon, protocol, storage, REST and WebSocket API
 - [x] Claude Code plugin: status, tools, subagents, approvals and questions, compaction, context, rate limits
-- [x] Exact token accounting from Claude Code's per-request telemetry
+- [x] Exact token accounting from Claude Code's transcripts, and optionally its per-request telemetry
 - [x] Web dashboard
 - [x] Bounded retention, following deletion and archiving in Claude
 - [x] Codex adapter and plugin; tokens, context and rate limits from its session logs

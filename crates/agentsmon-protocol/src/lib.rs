@@ -470,7 +470,8 @@ pub struct Quota {
     pub agent: String,
     pub windows: Vec<RateWindow>,
     pub updated_at: i64,
-    /// The session whose response reported it.
+    /// The session whose response reported it, or `usage` when read from the
+    /// agent's own record of the account's limits (Claude Code's `/usage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }

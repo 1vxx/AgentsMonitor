@@ -25,6 +25,7 @@ use serde_json::Value;
 
 use crate::hub::{Hub, Observed};
 use crate::store::{self, Op};
+use crate::tail::{self, Dirs, Head, Position};
 use crate::util::{format_utc, now_ms, parse_utc_ms};
 
 /// At most this much of one file is read per pass.
@@ -67,14 +68,13 @@ struct Thread {
 
 #[derive(Default)]
 struct Rollout {
-    /// Bytes read in this process.
-    read: u64,
+    /// How far it is read in this process.
+    pos: Position,
     /// Bytes whose requests an earlier run counted.
     counted: u64,
+    /// How the file counted is known again.
+    head: Option<Head>,
     first_read: bool,
-    /// In a line longer than a chunk (an image, a huge tool output), which
-    /// is no record: skipped to its end.
-    in_long_line: bool,
     len: u64,
     modified: Option<SystemTime>,
     thread: Option<Thread>,
@@ -87,15 +87,16 @@ pub struct Harvest {
     pub usage: Vec<UsageRecord>,
     /// Per session: when, and what was read, oldest first.
     pub seen: Vec<(String, i64, Observed)>,
-    /// How far each file read is now counted.
-    pub cursors: Vec<(String, u64)>,
+    /// How far each file read is now counted, and its head.
+    pub cursors: Vec<(String, u64, Option<String>)>,
 }
 
 pub struct Rollouts {
     root: PathBuf,
+    dirs: Dirs,
     files: HashMap<PathBuf, Rollout>,
     /// From the store, at the first pass.
-    counted: Option<HashMap<String, u64>>,
+    counted: Option<HashMap<String, (u64, Option<Head>)>>,
     /// Read for a session not reported yet: since when, when, and what.
     unsent: HashMap<String, (i64, i64, Observed)>,
     passes: u32,
@@ -107,14 +108,16 @@ impl Rollouts {
     }
 
     pub fn at(root: PathBuf) -> Rollouts {
-        Rollouts { root, files: HashMap::new(), counted: None, unsent: HashMap::new(), passes: 0 }
+        Rollouts { root, dirs: Dirs::default(), files: HashMap::new(), counted: None, unsent: HashMap::new(), passes: 0 }
     }
 
     /// Reads what the rollouts gained and hands it to the hub.
     pub fn pass(&mut self, hub: &Hub) {
         if self.counted.is_none() {
             match hub.store().read(store::log_cursors) {
-                Ok(rows) => self.counted = Some(rows.into_iter().collect()),
+                Ok(rows) => {
+                    self.counted = Some(rows.into_iter().map(|(name, offset, head)| (name, (offset, head.as_deref().and_then(Head::decode)))).collect())
+                }
                 Err(e) => {
                     tracing::warn!("codex: could not read log cursors: {e}");
                     return;
@@ -127,8 +130,8 @@ impl Rollouts {
             hub.ingest_usage(harvest.usage);
         }
         // After the requests, so a cursor never runs ahead of what it counted.
-        for (name, offset) in harvest.cursors {
-            hub.store().send(Op::Cursor { name, offset, ts: now });
+        for (name, offset, head) in harvest.cursors {
+            hub.store().send(Op::Cursor { name, offset, head, ts: now });
         }
         // The rollout is written as soon as the thread starts, the hook that
         // reports the session a moment later.
@@ -149,7 +152,10 @@ impl Rollouts {
     pub fn scan(&mut self) -> Harvest {
         let full = self.passes.is_multiple_of(FULL_WALK_EVERY);
         self.passes = self.passes.wrapping_add(1);
-        let mut paths: HashSet<PathBuf> = rollout_files(&self.root, if full { usize::MAX } else { 2 }).into_iter().collect();
+        let mut paths: HashSet<PathBuf> = rollout_files(&mut self.dirs, &self.root, if full { usize::MAX } else { 2 }).into_iter().collect();
+        if full {
+            self.dirs.forget_untouched();
+        }
         let now = SystemTime::now();
         let hot = |r: &Rollout| r.modified.and_then(|m| now.duration_since(m).ok()).is_none_or(|age| age < HOT);
         paths.extend(self.files.iter().filter(|(_, r)| full || hot(r)).map(|(p, _)| p.clone()));
@@ -162,10 +168,10 @@ impl Rollouts {
                 continue;
             };
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let counted = self.counted.as_ref().and_then(|c| c.get(&name)).copied().unwrap_or(0);
-            let r = self.files.entry(path.clone()).or_insert_with(|| Rollout { counted, ..Default::default() });
+            let (counted, head) = self.counted.as_ref().and_then(|c| c.get(&name)).copied().unwrap_or_default();
+            let r = self.files.entry(path.clone()).or_insert_with(|| Rollout { counted, head, ..Default::default() });
             r.modified = md.modified().ok();
-            if r.first_read && md.len() == r.read {
+            if r.first_read && md.len() == r.pos.read {
                 continue;
             }
             r.len = md.len();
@@ -183,60 +189,45 @@ impl Rollout {
         let mut file = std::fs::File::open(path)?;
         if !self.first_read {
             self.first_read = true;
-            if self.len < self.counted {
-                // Replaced by a shorter file: it is a new one.
+            if tail::replaced(&mut file, self.len, self.counted, self.head.as_ref())? {
+                // Another file under the name: it is a new one.
                 self.counted = 0;
+                self.head = None;
             }
             if self.len == self.counted {
                 // Nothing new since the last run: who it belongs to is enough.
+                file.seek(SeekFrom::Start(0))?;
                 let mut first = String::new();
                 BufReader::new((&mut file).take(FIRST_LINE_MAX)).read_line(&mut first)?;
                 let mut ignored = Harvest::default();
                 self.take(&first, 0, &mut ignored, &mut Seen::default());
-                self.read = self.len;
+                self.pos.read = self.len;
                 return Ok(());
             }
-        } else if self.len < self.read {
-            self.read = 0;
+        } else if tail::replaced(&mut file, self.len, self.pos.read, self.head.as_ref())? {
+            self.pos = Position::default();
             self.counted = 0;
+            self.head = None;
+        }
+        if self.head.is_none_or(|h| h.short_of(self.len)) {
+            self.head = Some(Head::of(&mut file, self.len)?);
         }
 
-        file.seek(SeekFrom::Start(self.read))?;
-        let mut chunk = Vec::new();
-        (&mut file).take(CHUNK.min(self.len - self.read)).read_to_end(&mut chunk)?;
-        let mut buf = &chunk[..];
-        if self.in_long_line {
-            let Some(end) = buf.iter().position(|&b| b == b'\n') else {
-                self.read += buf.len() as u64;
-                return Ok(());
-            };
-            self.in_long_line = false;
-            self.read += end as u64 + 1;
-            buf = &buf[end + 1..];
-        }
-        // Only whole lines: the rest is read again once it is complete.
-        let Some(last) = buf.iter().rposition(|&b| b == b'\n') else {
-            if buf.len() as u64 == CHUNK {
-                self.read += CHUNK;
-                self.in_long_line = true;
-            }
-            return Ok(());
-        };
         let mut seen = Seen::default();
-        let mut at = self.read;
-        for line in buf[..last].split(|&b| b == b'\n') {
-            let end = at + line.len() as u64 + 1;
+        let mut lines = Vec::new();
+        self.pos.read_lines(&mut file, self.len, CHUNK, |line, end| {
             if let Ok(text) = std::str::from_utf8(line)
                 && MARKERS.iter().any(|m| text.contains(m))
             {
-                self.take(text, end, out, &mut seen);
+                lines.push((text.to_string(), end));
             }
-            at = end;
+        })?;
+        for (text, end) in lines {
+            self.take(&text, end, out, &mut seen);
         }
-        self.read += last as u64 + 1;
-        if self.read > self.counted {
-            self.counted = self.read;
-            out.cursors.push((name.to_string(), self.read));
+        if self.pos.read > self.counted {
+            self.counted = self.pos.read;
+            out.cursors.push((name.to_string(), self.pos.read, self.head.map(|h| h.encode())));
         }
         if let Some(t) = &self.thread
             && let Some((ts, observed)) = seen.into_observed(t)
@@ -392,16 +383,12 @@ fn windows_of(rl: &Value) -> Option<Vec<RateWindow>> {
 }
 
 /// The rollout files of the newest `days` day folders, newest last.
-fn rollout_files(root: &Path, days: usize) -> Vec<PathBuf> {
-    let sorted = |p: &Path| -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(p).map(|it| it.filter_map(Result::ok).map(|e| e.path()).collect()).unwrap_or_default();
-        v.sort();
-        v
-    };
+fn rollout_files(dirs: &mut Dirs, root: &Path, days: usize) -> Vec<PathBuf> {
+    let folders = |dirs: &mut Dirs, p: &Path| -> Vec<PathBuf> { dirs.list(p).iter().filter(|e| e.is_dir).map(|e| e.path.clone()).collect() };
     let mut day_dirs = Vec::new();
-    'walk: for year in sorted(root).into_iter().rev().filter(|p| p.is_dir()) {
-        for month in sorted(&year).into_iter().rev().filter(|p| p.is_dir()) {
-            for day in sorted(&month).into_iter().rev().filter(|p| p.is_dir()) {
+    'walk: for year in folders(dirs, root).into_iter().rev() {
+        for month in folders(dirs, &year).into_iter().rev() {
+            for day in folders(dirs, &month).into_iter().rev() {
                 day_dirs.push(day);
                 if day_dirs.len() >= days {
                     break 'walk;
@@ -409,12 +396,16 @@ fn rollout_files(root: &Path, days: usize) -> Vec<PathBuf> {
             }
         }
     }
-    day_dirs
-        .iter()
-        .rev()
-        .flat_map(|d| sorted(d))
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl")))
-        .collect()
+    let mut files = Vec::new();
+    for day in day_dirs.iter().rev() {
+        files.extend(
+            dirs.list(day)
+                .iter()
+                .filter(|e| !e.is_dir && e.path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl")))
+                .map(|e| e.path.clone()),
+        );
+    }
+    files
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +557,9 @@ mod tests {
         assert_eq!((windows[0].kind.as_str(), windows[0].resets_at.as_deref()), ("five_hour", Some("2026-10-27T12:37:49Z")));
         assert_eq!(windows[1].kind, "seven_day");
         assert_eq!(seen.meta.as_ref().and_then(|m| m.surface.as_deref()), Some("desktop"));
-        let (name, offset) = h.cursors[0].clone();
+        let (name, offset, head) = h.cursors[0].clone();
+        let head = head.as_deref().and_then(Head::decode);
+        assert!(head.is_some());
         assert_eq!(name, "rollout-2026-10-27T15-48-07-s1.jsonl");
 
         // The rest of the line, a subagent's request in a file of its own.
@@ -588,22 +581,22 @@ mod tests {
         // the model again, and counts only what is new.
         let mut again = Rollouts::at(root.clone());
         let len = std::fs::metadata(&main).unwrap().len();
-        again.counted = Some(HashMap::from([(name.clone(), offset)]));
+        again.counted = Some(HashMap::from([(name.clone(), (offset, head))]));
         append(&main, &request("resp_4", "s1", "s1", 50, 0));
         let h = again.scan();
         let mut ids: Vec<&str> = h.usage.iter().map(|u| u.request_id.as_str()).collect();
         ids.sort();
         assert_eq!(ids, vec!["resp_2", "resp_3", "resp_4"]);
         assert!(h.usage.iter().all(|u| u.request_id != "resp_4" || u.model.as_deref() == Some("gpt-6.1-sol")));
-        assert!(h.cursors.iter().any(|(n, o)| n == &name && *o > len));
+        assert!(h.cursors.iter().any(|(n, o, _)| n == &name && *o > len));
 
         // Nothing new at all: only who the file belongs to is read.
         let mut idle = Rollouts::at(root.clone());
         let main_len = std::fs::metadata(&main).unwrap().len();
         let guardian_len = std::fs::metadata(&guardian).unwrap().len();
         idle.counted = Some(HashMap::from([
-            (name, main_len),
-            ("rollout-2026-10-27T15-55-02-g1.jsonl".to_string(), guardian_len),
+            (name.clone(), (main_len, head)),
+            ("rollout-2026-10-27T15-55-02-g1.jsonl".to_string(), (guardian_len, None)),
         ]));
         let h = idle.scan();
         assert!(h.usage.is_empty() && h.cursors.is_empty() && h.seen.is_empty());
@@ -632,6 +625,35 @@ mod tests {
     }
 
     #[test]
+    fn a_file_replaced_by_a_longer_one_is_read_from_the_top() {
+        let root = temp("replaced");
+        let day = root.join("2026/10/27");
+        std::fs::create_dir_all(&day).unwrap();
+        let file = day.join("rollout-2026-10-27T10-00-00-s3.jsonl");
+        append(&file, &meta("s3", "s3", json!("cli")));
+        append(&file, &request("resp_x", "s3", "s3", 10, 0));
+        let mut r = Rollouts::at(root.clone());
+        r.counted = Some(HashMap::new());
+        let h = r.scan();
+        assert_eq!(h.usage.len(), 1);
+        let (name, offset, head) = h.cursors[0].clone();
+
+        // Another thread written under the same name, longer than what was read.
+        std::fs::write(&file, meta("s4", "s4", json!("cli"))).unwrap();
+        append(&file, &request("resp_y", "s4", "s4", 10, 0));
+        append(&file, &request("resp_z", "s4", "s4", 10, 0));
+        assert!(std::fs::metadata(&file).unwrap().len() > offset);
+        let ids = |h: Harvest| h.usage.into_iter().map(|u| u.request_id).collect::<Vec<_>>();
+        assert_eq!(ids(r.scan()), vec!["resp_y", "resp_z"]);
+
+        // So does a later run that kept the first file's cursor.
+        let mut again = Rollouts::at(root.clone());
+        again.counted = Some(HashMap::from([(name, (offset, head.as_deref().and_then(Head::decode)))]));
+        assert_eq!(ids(again.scan()), vec!["resp_y", "resp_z"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn other_limits_are_left_alone() {
         assert!(windows_of(&json!({"limit_id": "codex_other", "primary": {"used_percent": 1.0}})).is_none());
         let w = windows_of(&json!({"primary": {"used_percent": 3.5, "window_minutes": 60}, "secondary": null})).unwrap();
@@ -647,11 +669,11 @@ mod tests {
             std::fs::write(root.join(day).join("notes.txt"), "").unwrap();
         }
         let names = |days| -> Vec<String> {
-            rollout_files(&root, days).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect()
+            rollout_files(&mut Dirs::default(), &root, days).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect()
         };
         assert_eq!(names(2), vec!["rollout-b.jsonl", "rollout-c.jsonl"]);
         assert_eq!(names(usize::MAX), vec!["rollout-a.jsonl", "rollout-b.jsonl", "rollout-c.jsonl"]);
-        assert!(rollout_files(&root.join("nowhere"), 2).is_empty());
+        assert!(rollout_files(&mut Dirs::default(), &root.join("nowhere"), 2).is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 

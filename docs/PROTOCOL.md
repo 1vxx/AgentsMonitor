@@ -54,7 +54,7 @@ Fields marked `?` are optional.
 
 | Route | Description |
 | --- | --- |
-| `POST /v1/logs` | OTLP/HTTP log export. Claude Code `api_request` records become token counts, deduplicated by `request_id`; every other record is discarded |
+| `POST /v1/logs` | OTLP/HTTP log export, optional. Claude Code `api_request` records become token counts, deduplicated by `request_id` with what the daemon reads from the transcripts; every other record is discarded |
 | `POST /v1/metrics` | Accepted and ignored, so an exporter pointed here reports no errors |
 
 Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`, no compression); protobuf receives `415`. Responses follow OTLP: `{"partialSuccess": {}}`. The body limit is 32 MiB.

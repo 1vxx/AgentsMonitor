@@ -460,6 +460,23 @@ impl Hub {
         known
     }
 
+    /// Files a reading of an account's rate limits that no session brought:
+    /// the agent's own record of them, read as `source` says.
+    pub fn note_rate_limits(&self, agent: &str, source: &str, ts: i64, windows: &[RateWindow]) {
+        let now = now_ms();
+        let mut out = Vec::new();
+        let mut st = self.state.lock();
+        self.note_quota(&mut st, agent, source, ts.min(now), windows, &mut out);
+        self.refresh_summary(&mut st, now, &mut out);
+        drop(st);
+        self.publish(out);
+    }
+
+    /// When the reading of the agent's rate limits held now was taken.
+    pub fn quota_at(&self, agent: &str) -> Option<i64> {
+        self.state.lock().quotas.get(agent).map(|q| q.updated_at)
+    }
+
     fn refresh_summary(&self, st: &mut State, now: i64, out: &mut Vec<Outbound>) {
         let quotas: Vec<Quota> = st.quotas.values().cloned().collect();
         let next = summary::build(st.sessions.values(), &quotas, now);

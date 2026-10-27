@@ -3,6 +3,7 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -23,6 +24,8 @@ pub struct Config {
     pub retention: Retention,
     /// How long an ended session stays in memory (and in the live view).
     pub keep_ended_hours: u32,
+    /// How Claude Code's usage limits are fetched again; `None` never.
+    pub claude_refresh: Option<crate::claude::Refresh>,
 }
 
 /// How long each kind of data lives, so the database stays bounded.
@@ -69,6 +72,8 @@ struct File {
     sessions: SessionsFile,
     #[serde(default)]
     retention: RetentionFile,
+    #[serde(default)]
+    claude: ClaudeFile,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -122,6 +127,26 @@ impl RetentionFile {
 #[serde(deny_unknown_fields)]
 struct SessionsFile {
     keep_ended_hours: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeFile {
+    /// Minutes between `claude -p /usage` runs at most; 0 turns them off.
+    usage_refresh_minutes: Option<u32>,
+    binary: Option<String>,
+}
+
+impl ClaudeFile {
+    fn resolve(self, home: &Path) -> Option<crate::claude::Refresh> {
+        match self.usage_refresh_minutes.unwrap_or(10) {
+            0 => None,
+            minutes => Some(crate::claude::Refresh {
+                every: Duration::from_secs(minutes as u64 * 60),
+                binary: self.binary.filter(|b| !b.trim().is_empty()).map(|b| expand(&b, home)),
+            }),
+        }
+    }
 }
 
 pub fn home() -> PathBuf {
@@ -183,6 +208,7 @@ impl Config {
             db: file.store.path.map(|p| expand(&p, &home)).unwrap_or_else(|| home.join("agentsmon.db")),
             retention: file.retention.resolve(),
             keep_ended_hours: file.sessions.keep_ended_hours.unwrap_or(24),
+            claude_refresh: file.claude.resolve(&home),
             home,
         })
     }
@@ -226,6 +252,15 @@ pub const EXAMPLE: &str = r#"# ~/.agentsmon/config.toml — every field is optio
 [sessions]
 # How long an ended session stays in memory and in the live view.
 # keep_ended_hours = 24
+
+[claude]
+# Claude Code keeps the account's usage limits as it last fetched them, which
+# it does for /usage. While Claude Code is at work and no reading is newer
+# than this many minutes (the plugin reports one after every turn), the daemon
+# runs `claude -p /usage`, which asks no model. 0 never runs it.
+# usage_refresh_minutes = 10
+# The claude to run; by default the one on PATH or where its installers put it.
+# binary = "~/.local/bin/claude"
 "#;
 
 #[cfg(test)]
@@ -236,6 +271,16 @@ mod tests {
     fn example_parses() {
         let file: File = toml::from_str(EXAMPLE).unwrap();
         assert!(file.http.listen.is_none());
+    }
+
+    #[test]
+    fn claude_usage_refresh_defaults_to_ten_minutes_and_turns_off() {
+        let home = Path::new("/h");
+        let on = ClaudeFile::default().resolve(home).unwrap();
+        assert_eq!((on.every, on.binary), (Duration::from_secs(600), None));
+        assert!(ClaudeFile { usage_refresh_minutes: Some(0), binary: None }.resolve(home).is_none());
+        let custom = ClaudeFile { usage_refresh_minutes: Some(3), binary: Some("/opt/claude".into()) }.resolve(home).unwrap();
+        assert_eq!((custom.every, custom.binary), (Duration::from_secs(180), Some(PathBuf::from("/opt/claude"))));
     }
 
     #[test]

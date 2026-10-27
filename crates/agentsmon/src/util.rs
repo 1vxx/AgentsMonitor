@@ -67,6 +67,12 @@ pub fn format_utc(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3_600, rem % 3_600 / 60, rem % 60)
 }
 
+/// RFC 3339 UTC form of milliseconds since the epoch, to the millisecond.
+pub fn format_utc_ms(ms: i64) -> String {
+    let secs = format_utc(ms.div_euclid(1_000));
+    format!("{}.{:03}Z", secs.trim_end_matches('Z'), ms.rem_euclid(1_000))
+}
+
 /// The last path component of `cwd`, what a session is called on screen.
 pub fn project_name(cwd: &str) -> String {
     cwd.trim_end_matches('/')
@@ -98,6 +104,8 @@ mod tests {
         assert_eq!(format_utc(1_793_104_669), "2026-10-27T12:37:49Z");
         assert_eq!(format_utc(0), "1970-01-01T00:00:00Z");
         assert_eq!(parse_utc_ms(&format_utc(1_709_208_000)), Some(1_709_208_000_000));
+        assert_eq!(format_utc_ms(1_793_087_297_023), "2026-10-27T07:48:17.023Z");
+        assert_eq!(parse_utc_ms(&format_utc_ms(1_793_087_297_923)), Some(1_793_087_297_923));
     }
 
     #[test]
