@@ -271,9 +271,12 @@ export const zh: Record<Key, Message> = {
   'tok.noExports': '还没收到 Claude Code 的用量上报',
   'tok.noExportsBody':
     '在 <code>~/.claude/settings.json</code> 的 <code>env</code> 里设置 <code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>、<code>OTEL_LOGS_EXPORTER=otlp</code>、<code>OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json</code>、<code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:7788/v1/logs</code>。配置只对之后启动的会话生效：终端里新开 <code>claude</code>，桌面 App 需要完全退出后重新打开。',
-  'tok.footnote': '每次模型请求按 Claude Code 自己上报的用量计数一次（按请求 ID 去重），主会话、子代理、上下文压缩和后台请求都包含在内。',
+  'tok.footnote': '每次模型请求只计数一次（按请求 ID 去重）：Claude Code 的取自它自己上报的用量，Codex 的取自它的会话日志。主会话、子代理、上下文压缩和后台请求都包含在内。',
   'tok.lastRequest': ' 最近一次请求：{t}。',
   'src.repl_main_thread': '主会话',
+  'src.main': '主会话',
+  'src.guardian': '审批审查',
+  'src.subagent': '子代理',
   'src.sdk': '非交互（-p / SDK）',
   'src.compact': '上下文压缩',
   'src.none': '未标注',

@@ -18,7 +18,7 @@ const CLAUDE_LOGO =
 
 const KNOWN: Record<string, AgentInfo> = {
   'claude-code': { label: 'Claude', short: 'CL', color: 'var(--series-1)', logo: CLAUDE_LOGO },
-  codex: { label: 'Codex', short: 'CX', color: 'var(--series-1)' },
+  codex: { label: 'Codex', short: 'CX', color: 'var(--series-2)' },
 }
 
 export const agentInfo = (agent: string): AgentInfo =>

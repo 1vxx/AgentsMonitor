@@ -1,13 +1,14 @@
 # AgentsMonitor
 
-A local monitor for coding-agent sessions. It tracks every Claude Code session on the machine (what it is doing, which tool is running, whether it is waiting for you), along with context usage, exact token counts and account rate limits. A web dashboard shows the data, and a small AMOLED display will show it in a later phase.
+A local monitor for coding-agent sessions. It tracks every Claude Code and Codex session on the machine (what it is doing, which tool is running, whether it is waiting for you), along with context usage, exact token counts and account rate limits. A web dashboard shows the data, and a small AMOLED display will show it in a later phase.
 
-Claude Code is supported today. Codex and other agents each need only an adapter and an integration (see [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent)).
+Claude Code and Codex are supported. Other agents each need only an adapter and an integration (see [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent)).
 
 ```
 Claude Code ──(plugin, in-process hooks)──┐
 Claude Code ──(OpenTelemetry token counts)─┤   Unix socket / 127.0.0.1:7788
-Codex (planned) ──(agentsmon hook)─────────┤
+Codex ──(plugin, agentsmon hook)───────────┤
+Codex ──(rollout logs, read by the daemon)─┤
                                            ▼
                         ┌────────────────────────────────────┐
                         │ agentsmon daemon (Rust)            │
@@ -27,6 +28,7 @@ Codex (planned) ──(agentsmon hook)─────────┤
 | `crates/agentsmon` | The daemon, hook forwarder and CLI, in one binary |
 | `crates/agentsmon-protocol` | Wire types: events, sessions, quotas, summaries, WebSocket messages |
 | `plugins/claude-code` | Claude Code plugin (hooks module, runs inside Claude Code) |
+| `plugins/codex` | Codex plugin (command hooks that run `agentsmon hook`) |
 | `web` | Web dashboard (React, Vite), started only when needed |
 | `docs` | [Architecture](docs/ARCHITECTURE.md), [Protocol and API](docs/PROTOCOL.md) |
 
@@ -35,6 +37,7 @@ Codex (planned) ──(agentsmon hook)─────────┤
 - Rust 1.85 or newer (2024 edition)
 - Node.js 20+ and pnpm, for the dashboard
 - Claude Code with hooks-module support (tested with 2.1.308)
+- Codex with plugins and lifecycle hooks (tested with 0.160.1), for Codex sessions
 - macOS for `agentsmon service` (launchd) and for Claude Desktop archive tracking; the daemon itself also runs on Linux
 
 ## Quick start
@@ -55,9 +58,13 @@ agentsmon serve
 agentsmon service install
 ```
 
-### 2. Load the Claude Code plugin
+### 2. Load the plugins
 
-Install it from this repository, which is also a plugin marketplace:
+This repository is also a plugin marketplace, for Claude Code and for Codex.
+
+#### Claude Code
+
+Install the plugin:
 
 ```bash
 claude plugin marketplace add /path/to/AgentsMonitor
@@ -78,6 +85,20 @@ Plugin options:
 | `detail` | `preview` | `preview` sends the start of prompts and answers and what each tool works on; `none` sends statuses and numbers only |
 | `socket` | `$AGENTSMON_SOCKET` or `~/.agentsmon/agentsmon.sock` | The daemon's Unix socket |
 
+#### Codex
+
+Install it from the same marketplace:
+
+```bash
+codex plugin marketplace add /path/to/AgentsMonitor
+```
+
+```bash
+codex plugin add agentsmon@agentsmon
+```
+
+Restart Codex, then trust the plugin's hooks with `/hooks` in the CLI or the hook review controls in the Codex app; Codex skips hooks that are not trusted. The hooks run `agentsmon`, so it must be in `~/.cargo/bin` (where `cargo install` puts it), `/opt/homebrew/bin`, `/usr/local/bin` or on Codex's `PATH`. See [plugins/codex](plugins/codex/README.md).
+
 ### 3. Enable exact token counts
 
 Token counts come from Claude Code's own per-request telemetry. Add the following to the `env` block of `~/.claude/settings.json`:
@@ -91,6 +112,8 @@ Token counts come from Claude Code's own per-request telemetry. Add the followin
 ```
 
 The exporter sends only to the local daemon. Counting starts with sessions started after the change; quit and reopen Claude Desktop for it to apply there. Requests made while the daemon is down cannot be counted later, so keep it running (`agentsmon service install`). Without this setting, token figures are estimates summed from turn ends and are marked `≈`.
+
+Codex needs no setting: the daemon reads every request's token counts, the context fill and the rate limits from Codex's session logs (`~/.codex/sessions`, or `$CODEX_HOME/sessions`), including requests made while it was down.
 
 ### 4. Open the dashboard
 
@@ -162,12 +185,13 @@ Storage stays bounded. Deleted space returns to the file system right away (incr
 | Ended sessions and their events | 30 days after they end |
 | Sessions deleted in Claude Code (in the app, or by its `cleanupPeriodDays` cleanup) | Removed within 15 s, running or ended |
 | Sessions archived in Claude Desktop | Removed from the live view within 15 s; kept in History until retention ends. Unarchived and resumed, they return with their statistics |
+| Codex sessions deleted or archived in Codex | The same, read from Codex's thread records (`~/.codex/state_<n>.sqlite`) |
 | Event history, rate-limit readings | 30 days |
 | Token counts | Per request for 90 days, then per hour until 400 days, then per day until 5 years. Totals stay exact at every step |
 
 The daemon checks for deletions and archiving every 15 s and applies retention at start and every 10 min. The Daemon view can run a pass on demand, or remove every ended session at once; token totals are never reduced. All periods can be changed under `[retention]` in the config file.
 
-Archive state is read from Claude Desktop's own session records (`~/Library/Application Support/Claude/claude-code-sessions/`). That format is not public: the daemon only reads it, and if it cannot, archived sessions simply follow the retention period.
+Archive state is read from Claude Desktop's own session records (`~/Library/Application Support/Claude/claude-code-sessions/`). That format is not public: the daemon only reads it, and if it cannot, archived sessions simply follow the retention period. Codex's thread records and session logs are not public either and are handled the same way.
 
 ## Security and privacy
 
@@ -175,6 +199,7 @@ Archive state is read from Claude Desktop's own session records (`~/Library/Appl
 - Binding to any other address requires `http.token`; the daemon refuses to start without one.
 - Requests from browsers are accepted only from loopback origins and `http.allowed_origins`, so other web pages cannot read sessions or inject events.
 - With `detail = none`, the plugin sends no prompt, answer or command text.
+- The Codex plugin forwards each hook payload whole over the socket; the daemon keeps only the start of prompts and answers and what each tool works on.
 - Telemetry goes only to the local daemon, which keeps the per-request token counts and discards every other record.
 
 ## Performance
@@ -184,7 +209,8 @@ The monitor must never slow an agent down:
 - Plugin hooks only queue an event and return. A timer sends events in ordered batches after the hook completes; one round trip over the socket takes about 70 µs. While the daemon is down, events wait in a bounded queue (1,000) and go out in order once it is back.
 - The daemon runs on one thread. Each event is a microsecond-scale reducer step. Every change is serialized once and shared by all WebSocket clients, and SQLite writes are batched on a separate thread. Measured: 7.4 MB resident memory and 0.27 s total CPU after 2,300 batches.
 - Memory is bounded: live sessions plus those ended in the last 24 h, and at most 50,000 request ids (6 h) for deduplication.
-- `agentsmon hook`, the fallback for command-hook agents, forwards stdin without parsing it or starting an async runtime: about 5 ms per event, mostly process start-up.
+- `agentsmon hook`, which the Codex plugin and other command-hook agents use, forwards stdin without parsing it or starting an async runtime: about 5 ms per event, mostly process start-up.
+- Codex's session logs are read every 2 s, only what each file gained, and only lines that name a token or session record are parsed.
 
 ## Development
 
@@ -209,5 +235,5 @@ In Claude Desktop, the `dashboard` entry in `.claude/launch.json` previews the d
 - [x] Exact token accounting from Claude Code's per-request telemetry
 - [x] Web dashboard
 - [x] Bounded retention, following deletion and archiving in Claude
-- [ ] Codex adapter and integration
+- [x] Codex adapter and plugin; tokens, context and rate limits from its session logs
 - [ ] ESP32 display with a 1.75" AMOLED screen, driven by `/v1/summary`

@@ -3,6 +3,7 @@
 mod adapters;
 mod api;
 mod client;
+mod codex;
 mod config;
 mod desktop;
 mod hub;
@@ -47,7 +48,8 @@ enum Command {
         config: Option<PathBuf>,
     },
     /// Forward an agent's hook payload (stdin) to the daemon. Always exits 0
-    /// and prints nothing, so it can never get in the agent's way.
+    /// and asks the agent for nothing (prints nothing; `{}` for Codex, whose
+    /// Stop hook expects JSON), so it can never get in the agent's way.
     Hook {
         /// Which agent the payload comes from: claude-code, codex, ...
         #[arg(long)]
@@ -83,6 +85,9 @@ fn main() -> ExitCode {
         Command::Serve { config } => serve(config.as_deref()),
         Command::Hook { agent } => {
             hook(&agent);
+            if agent == agentsmon_protocol::agents::CODEX {
+                println!("{{}}");
+            }
             Ok(())
         }
         Command::Status { json } => status(json),
@@ -239,6 +244,30 @@ async fn run(cfg: Config) -> Result<(), String> {
         loop {
             tick.tick().await;
             sweeper.sweep();
+        }
+    });
+
+    // Codex's token counts, context and rate limits, from its rollout logs.
+    let codex_hub = hub.clone();
+    tokio::spawn(async move {
+        let mut rollouts = codex::Rollouts::new();
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let hub = codex_hub.clone();
+            rollouts = match tokio::task::spawn_blocking(move || {
+                rollouts.pass(&hub);
+                rollouts
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("codex collector stopped: {e}");
+                    return;
+                }
+            };
         }
     });
 

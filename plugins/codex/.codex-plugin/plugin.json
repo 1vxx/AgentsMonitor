@@ -1,0 +1,8 @@
+{
+  "name": "agentsmon",
+  "version": "0.1.0",
+  "description": "Streams this session's status, tools, approvals and questions to the local agentsmon daemon",
+  "author": { "name": "1v" },
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json"
+}

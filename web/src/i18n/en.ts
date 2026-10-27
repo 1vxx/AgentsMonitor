@@ -276,9 +276,12 @@ export const en = {
   'tok.noExportsBody':
     'In the <code>env</code> block of <code>~/.claude/settings.json</code>, set <code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>, <code>OTEL_LOGS_EXPORTER=otlp</code>, <code>OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json</code> and <code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:7788/v1/logs</code>. Only sessions started afterwards pick it up: open a new <code>claude</code> in the terminal, and quit the desktop app fully before reopening it.',
   'tok.footnote':
-    'Each model request is counted once, from the usage Claude Code reports itself (deduplicated by request ID); the main session, subagents, context compaction and background requests are all included.',
+    'Each model request is counted once (deduplicated by request ID): Claude Code\'s from the usage it reports itself, Codex\'s from its session logs. The main session, subagents, context compaction and background requests are all included.',
   'tok.lastRequest': ' Last request: {t}.',
   'src.repl_main_thread': 'Main session',
+  'src.main': 'Main session',
+  'src.guardian': 'Approval review',
+  'src.subagent': 'Subagent',
   'src.sdk': 'Non-interactive (-p / SDK)',
   'src.compact': 'Context compaction',
   'src.none': 'Unlabelled',

@@ -6,21 +6,23 @@
 Integrations (one per agent)        agentsmon daemon                                   Consumers
 ────────────────────────────        ──────────────────────────────────────────         ─────────────────
 Claude Code plugin ─ canonical ─▶   ingest ─▶ adapters ─▶ reducer ─▶ hub ─────────▶    WebSocket, REST
-Command hooks ────── raw ───────▶   (UDS)     (raw → canonical)        │                (dashboard, CLI,
+Codex plugin ─────── raw ───────▶   (UDS)     (raw → canonical)        │                (dashboard, CLI,
 Claude Code OTel ─── OTLP JSON ─▶   /v1/logs ─▶ token ledger ──────────┤                 display device)
+Codex rollout logs ◀─ read ─────    codex collector ───────────────────┤
                                                                        ├─▶ store thread (SQLite)
                                                        janitor ────────┘
 ```
 
 | Component | Source | Role |
 | --- | --- | --- |
-| Integrations | `plugins/`, `agentsmon hook` | Report what the agent does. First-party plugins send canonical events; agents limited to command hooks forward their payloads unchanged as `raw` events |
+| Integrations | `plugins/`, `agentsmon hook` | Report what the agent does. The Claude Code plugin sends canonical events; the Codex plugin, limited to command hooks, forwards their payloads unchanged as `raw` events |
 | Adapters | `src/adapters/` | The only agent-specific code in the daemon: map raw hook payloads and OpenTelemetry records to canonical form, and define each agent's liveness `Profile` |
 | Reducer | `src/reducer.rs` | Pure function `apply(session, ts, event)`: no clock, no I/O, fully unit-tested |
 | Hub | `src/hub.rs` | Owns sessions, quotas and the event sequence behind one lock. Each batch serializes every changed session once and broadcasts it |
 | Store | `src/store.rs` | SQLite in WAL mode. One thread batches writes into transactions; reads use a second connection |
 | Janitor | `src/janitor.rs` | Follows deletion and archiving in Claude, applies retention, compacts the database |
 | OTLP | `src/otlp.rs` | Reads token counts from OTLP/HTTP JSON log exports |
+| Codex | `src/codex.rs` | Reads token counts, context and rate limits from Codex's rollout logs, and titles, archiving and deletion from its thread records |
 | Desktop | `src/desktop.rs` | Reads Claude Desktop's archive state |
 | Titles | `src/titles.rs` | Reads the short title Claude Code gives each session from its transcript |
 
@@ -47,7 +49,7 @@ Events record only what is in flight: the main turn, running tools, subagents, a
 
 ## Liveness
 
-| | Claude Code (heartbeat every 20 s) | Other agents |
+| | Claude Code (heartbeat every 20 s) | Codex and other agents |
 | --- | --- | --- |
 | Marked `stale` | After 65 s of silence | After 120 s of silence, only if it sends heartbeats |
 | Ended as `lost` | After 30 min of silence | After 12 h of silence |
@@ -77,6 +79,26 @@ The sweep runs every 5 s. A gap of more than 30 s between sweeps means the machi
 
 **Known limitation.** The API has no event for an approval being granted. A long command that was approved shows `waiting_permission` until it finishes; a denied one clears at once.
 
+## Codex plugin
+
+`plugins/codex/` holds `.codex-plugin/plugin.json` and `hooks/hooks.json`, which runs `hooks/forward.sh` for all twelve lifecycle events. The script finds `agentsmon` (on `PATH`, in `~/.cargo/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or at `$AGENTSMON_BIN`) and runs `agentsmon hook --agent codex`, which forwards the payload and answers `{}`: Codex's `Stop` hook expects JSON. The hooks are synchronous, which keeps events in order; Codex runs `async: true` hooks concurrently. `.agents/plugins/marketplace.json` is the Codex marketplace entry, beside Claude Code's `.claude-plugin/marketplace.json`.
+
+`adapters/codex.rs` maps the payloads:
+
+| Codex hook | Canonical events |
+| --- | --- |
+| `SessionStart`, `SessionEnd` | `session.start` with `source`, `session.end` |
+| `UserPromptSubmit` | `prompt`, `turn.start` |
+| `PreToolUse`, `PostToolUse` | `tool.start`, `tool.end`; `request_user_input` also raises `attention` (input) |
+| `PermissionRequest` | `attention` (permission) |
+| `Stop`, `Interrupt` | `turn.end` (answer, aborted) |
+| `SubagentStart`, `SubagentStop` | `turn.start`, `turn.end` with the subagent id |
+| `PreCompact`, `PostCompact` | `compact.start`, `compact.end` |
+
+`request_user_input_async` returns before the person answers and the turn ends with the question open. The adapter remembers the question and raises `attention` (input) after that turn's `turn.end`; the next prompt clears it. Every payload carries `cwd`, `model` and `permission_mode`. `transcript_path` is left out: Codex calls its format unstable and moves the file on archiving or removes it once history moves into its database, so the janitor follows the thread records instead.
+
+**Known limitations.** Codex has no hook for a failed turn, an idle reminder or a granted approval, and command hooks cannot beat: a Codex session that crashes keeps its last status until 12 h of silence end it as `lost`. Hosted tools such as web search run no hooks.
+
 ## Token accounting
 
 Token counts are the only figures that must be exact, so they are kept in a ledger of their own rather than derived from status events.
@@ -86,6 +108,7 @@ Token counts are the only figures that must be exact, so they are kept in a ledg
 - **Attribution.** Each request is added to its session's `stats`, which sets `exact_tokens`; from then on `turn.end` usage is no longer added. Requests that arrive after the session ended (the final export at exit) still count. Requests for a session not yet known wait until it appears.
 - **Retention.** Requests are kept individually for `token_detail_days`, then folded into `token_hourly` by whole hours, then into `token_daily` by whole days, and dropped after `token_daily_days`. Every query reads all three tables, so totals do not change when data is folded. A window is exact to the request, hour or day, depending on how far back it reaches.
 - **Verification.** For a real session with a subagent, the ledger matched the session transcript request by request (6 of 6, all four counts), and the session's totals matched the ledger.
+- **Codex.** Codex writes a `token_usage_record` after every model request to the thread's rollout log (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`), keyed by its `response_id`. `codex.rs` reads what each file gained every 2 s and keeps in `log_cursors` how far each file is counted, so a request counts once across restarts and requests made while the daemon was down are counted when it is back. A subagent's thread logs to a file of its own under its root session's id, and its requests count there with its kind as the source (`guardian`, `subagent`). OpenAI counts cached input inside the input, so the ledger's input is the uncached part. The same files' `token_count` events give the session's context fill and the account's windows (`five_hour`, `seven_day`). What the logs say about a session the plugin has not reported yet waits for it for 10 min; files never create sessions. Codex's OpenTelemetry events carry no request id, so they are not used.
 - **Fallback.** Without OpenTelemetry export, session token figures are summed from turn ends. That misses interrupted turns and requests outside turns, and the dashboard marks those figures `≈`.
 
 ## Retention and cleanup
@@ -96,6 +119,7 @@ The janitor runs on two schedules.
 
 - An ended session whose transcript no longer exists was deleted in Claude Code, or never kept one. A running session whose transcript existed and is now gone was deleted while running. Both are forgotten at once. A 24 h tombstone stops a late heartbeat or end event from recreating them; a new `session.start` may.
 - A session archived in Claude Desktop leaves memory, and therefore the live view, but stays in the store. `desktop.rs` reads `archived-sessions.idx` only when it changes and maps each local id to the Claude Code session id through `cliSessionId` in `local_<id>.json`. The format is internal to Claude Desktop: it is read-only and best effort, and anything unreadable is skipped.
+- A Codex session follows its row in Codex's thread records (`~/.codex/state_<n>.sqlite`, read-only): archived there, it leaves the live view; gone from there after it was found, it was deleted and is forgotten. Its title is the thread's `name`, the one Codex shows.
 - A session that reappears after leaving memory (unarchived, or resumed days later) is reloaded from the store, so its statistics continue.
 - Each Claude Code session takes its title from its transcript, where Claude Code writes `custom-title` (a `/rename`, or Claude Desktop's title), `ai-title` (its generated one) and `agent-name` lines. The latest of each kind counts and the kinds rank in that order. `titles.rs` reads only what each transcript gained since the last pass and parses only lines that name a title kind. Like the Desktop records, the format is internal: read-only and best effort. A stored session out of memory without a title is looked at once by the 10 min pass.
 
@@ -118,12 +142,12 @@ SIGINT, SIGTERM and SIGHUP (the terminal closing) trigger the same sequence: rem
 
 ## Adding an agent
 
-Codex is the next integration. Neither the protocol nor the reducer changes.
+Neither the protocol nor the reducer changes; Codex was added this way.
 
-1. **Adapter.** Add `src/adapters/codex.rs` with `normalize(&Value) -> Result<Normalized, AdapterError>` and register it, with a liveness `Profile`, in `adapters/mod.rs`. Codex hook events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `Interrupt`, `SessionEnd`) resemble Claude Code's command hooks; `adapters/claude.rs` is the model. Map `Interrupt` to `turn.end` (aborted) and `request_user_input` to `attention` (input). `adapters/tool.rs` already extracts subjects from `shell` and `exec_command`.
-2. **Integration.** Add `plugins/codex/` with `.codex-plugin/plugin.json` whose `hooks` file runs `agentsmon hook --agent codex` for each event (`timeout: 1`). The forwarder prints nothing and always exits 0.
-3. **Tokens and rate limits.** Map Codex's own OpenTelemetry events in `adapters::usage_from_otel`. Its rate-limit windows are written to the session rollout logs (`~/.codex/sessions/**/rollout-*.jsonl`); a collector task can read them incrementally and emit `usage` events (confirm field names against real logs).
-4. **Dashboard.** `web/src/agents.ts` already names Codex; agents not listed there appear under their own name.
+1. **Adapter.** Add `src/adapters/<agent>.rs` with `normalize(&Value) -> Result<Normalized, AdapterError>` and register it, with a liveness `Profile`, in `adapters/mod.rs`. `claude.rs` and `codex.rs` are the models.
+2. **Integration.** A plugin or settings entry whose hooks run `agentsmon hook --agent <agent>` for each event, as `plugins/codex/` does.
+3. **Tokens and rate limits.** Map the agent's OpenTelemetry events in `adapters::usage_from_otel` when they carry a request id, or read its own logs as `codex.rs` does and hand the hub `UsageRecord`s and `Observed` readings.
+4. **Dashboard.** Name it in `web/src/agents.ts`; agents not listed there appear under their own name.
 
 ## Display device
 

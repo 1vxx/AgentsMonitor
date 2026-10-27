@@ -1,7 +1,7 @@
-//! Keeps the daemon's data bounded and in step with Claude Code's own:
+//! Keeps the daemon's data bounded and in step with the agents' own:
 //! forgets ended sessions once they are old enough or once Claude Code
-//! deleted their transcript, has the store prune and fold the rest, and
-//! picks up the titles Claude Code gives its sessions.
+//! deleted their transcript (Codex, its thread), has the store prune and fold
+//! the rest, and picks up the titles the agents give their sessions.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::codex::Threads;
 use crate::config::Retention;
 use crate::desktop::Desktop;
 use crate::hub::Hub;
@@ -94,6 +95,8 @@ pub struct Watch {
     /// Sessions whose transcript was there once.
     seen: HashSet<String>,
     desktop: Desktop,
+    /// Codex's own records of its threads.
+    codex: Threads,
     /// How far each live session's transcript has been read for its title.
     titles: Titles,
     /// Stored sessions already looked at for a title, found or not.
@@ -102,15 +105,21 @@ pub struct Watch {
 
 impl Default for Watch {
     fn default() -> Watch {
-        Watch { seen: HashSet::new(), desktop: Desktop::new(), titles: Titles::default(), titles_tried: HashSet::new() }
+        Watch {
+            seen: HashSet::new(),
+            desktop: Desktop::new(),
+            codex: Threads::new(),
+            titles: Titles::default(),
+            titles_tried: HashSet::new(),
+        }
     }
 }
 
 #[derive(Debug, Default, PartialEq, Serialize)]
 pub struct Quick {
-    /// Forgotten: deleted in Claude Code.
+    /// Forgotten: deleted in Claude Code or Codex.
     pub deleted: usize,
-    /// Taken out of the live view: archived in Claude Desktop.
+    /// Taken out of the live view: archived in Claude Desktop or Codex.
     pub archived: usize,
 }
 
@@ -119,10 +128,11 @@ pub struct Quick {
 /// transcript is gone (or never was), a running one whose transcript was
 /// there and is gone; those are forgotten. Archived in Claude Desktop: taken
 /// out of the live view, kept in the history. The rest get the title their
-/// transcript gives them.
+/// transcript gives them. Codex sessions follow their thread records the
+/// same way: gone from them is deleted, and the name is the title.
 pub fn quick_pass(hub: &Hub) -> Quick {
     let mut watch = hub.watch.lock();
-    let Watch { seen, desktop, titles, .. } = &mut *watch;
+    let Watch { seen, desktop, codex, titles, .. } = &mut *watch;
     let sessions = hub.presence();
     let mut gone = Vec::new();
     if hub.retention.follow_transcripts {
@@ -141,7 +151,7 @@ pub fn quick_pass(hub: &Hub) -> Quick {
     seen.retain(|k| present.contains(k));
 
     let archived_ids = desktop.archived();
-    let archived: Vec<String> = sessions
+    let mut archived: Vec<String> = sessions
         .iter()
         .filter(|s| s.agent == agentsmon_protocol::agents::CLAUDE_CODE && archived_ids.contains(&s.session_id))
         .filter(|s| !gone.contains(&s.key))
@@ -152,13 +162,21 @@ pub fn quick_pass(hub: &Hub) -> Quick {
         .filter(|s| s.agent == agentsmon_protocol::agents::CLAUDE_CODE && !gone.contains(&s.key))
         .filter_map(|s| Some((s.key.clone(), s.transcript.clone()?)))
         .collect();
-    let named = titles.scan(&readable);
+    let mut named = titles.scan(&readable);
+
+    let codex_ids: Vec<String> =
+        sessions.iter().filter(|s| s.agent == agentsmon_protocol::agents::CODEX).map(|s| s.session_id.clone()).collect();
+    let followed = codex.follow(&codex_ids);
+    let key = |id: &String| agentsmon_protocol::Session::key_for(agentsmon_protocol::agents::CODEX, id);
+    gone.extend(followed.deleted.iter().map(key));
+    archived.extend(followed.archived.iter().map(key));
+    named.extend(followed.titles.iter().map(|(id, title)| (key(id), title.clone())));
     drop(watch);
 
     hub.set_titles(&named);
     let quick = Quick { deleted: hub.forget_many(&gone), archived: hub.hide_many(&archived) };
     if quick != Quick::default() {
-        tracing::info!("{} sessions deleted in Claude Code forgotten, {} archived ones out of the live view", quick.deleted, quick.archived);
+        tracing::info!("{} deleted sessions forgotten, {} archived ones out of the live view", quick.deleted, quick.archived);
     }
     quick
 }

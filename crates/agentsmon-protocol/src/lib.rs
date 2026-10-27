@@ -290,7 +290,8 @@ pub struct ContextUsage {
 }
 
 /// One rate-limit window of an account: `five_hour`, `seven_day`, a
-/// gateway's `spend_limit`, Codex's `primary`/`secondary`.
+/// gateway's `spend_limit`, Codex's `primary`/`secondary` when they are
+/// windows of other lengths.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RateWindow {
     pub kind: String,

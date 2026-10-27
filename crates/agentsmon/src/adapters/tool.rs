@@ -16,17 +16,31 @@ pub fn subject_for(tool: &str, input: &Value) -> Option<String> {
         "WebSearch" => field("query"),
         "Agent" | "Task" => field("description"),
         "Skill" => field("skill"),
-        "AskUserQuestion" => input
+        _ if is_question(tool) => input
             .get("questions")
             .and_then(|q| q.get(0))
-            .and_then(|q| q.get("question"))
-            .and_then(Value::as_str),
+            .and_then(|q| ["question", "title", "header"].into_iter().find_map(|k| q.get(k).and_then(Value::as_str))),
+        // Codex's patches name their files in the patch text.
+        "apply_patch" => field("command").or(field("input")).and_then(|patch| {
+            patch.lines().find_map(|l| {
+                ["*** Update File: ", "*** Add File: ", "*** Delete File: "].into_iter().find_map(|p| l.strip_prefix(p))
+            })
+        }),
         _ if tool.starts_with("mcp__") => tool.split("__").nth(1),
         _ => ["file_path", "path", "command", "pattern", "url", "query", "description"]
             .into_iter()
             .find_map(field),
     }?;
     preview(text, SUBJECT_CHARS)
+}
+
+/// Tools that ask the person a question: Claude Code's, and Codex's (also
+/// reached through MCP, `mcp__<server>__request_user_input`).
+pub fn is_question(tool: &str) -> bool {
+    matches!(
+        tool.rsplit("__").next().unwrap_or(tool),
+        "AskUserQuestion" | "request_user_input" | "request_user_input_async"
+    )
 }
 
 #[cfg(test)]
@@ -41,5 +55,17 @@ mod tests {
         assert_eq!(subject_for("mcp__github__get_pr", &json!({})).as_deref(), Some("github"));
         assert_eq!(subject_for("Mystery", &json!({"path": "x"})).as_deref(), Some("x"));
         assert_eq!(subject_for("Mystery", &json!({})), None);
+    }
+
+    #[test]
+    fn reads_codex_tools() {
+        let patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
+        assert_eq!(subject_for("apply_patch", &json!({"command": patch})).as_deref(), Some("a.txt"));
+        assert_eq!(subject_for("apply_patch", &json!({"command": "junk"})), None);
+        let asked = json!({"questions": [{"title": "Which one?"}]});
+        assert_eq!(subject_for("request_user_input_async", &asked).as_deref(), Some("Which one?"));
+        let asked = json!({"questions": [{"header": "Pick", "question": "Which one?"}]});
+        assert_eq!(subject_for("request_user_input", &asked).as_deref(), Some("Which one?"));
+        assert!(is_question("mcp__codex_apps__request_user_input") && !is_question("exec_command"));
     }
 }

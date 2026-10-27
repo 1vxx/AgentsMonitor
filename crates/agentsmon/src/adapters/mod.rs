@@ -10,9 +10,10 @@ use agentsmon_protocol::{Event, SessionMeta, UsageRecord, agents};
 use serde_json::Value;
 
 pub mod claude;
+pub mod codex;
 mod tool;
 
-pub use tool::subject_for;
+pub use tool::{is_question, subject_for};
 
 /// What an adapter read out of one raw payload.
 #[derive(Debug)]
@@ -44,8 +45,7 @@ impl std::fmt::Display for AdapterError {
 pub fn normalize(agent: &str, payload: &Value) -> Result<Normalized, AdapterError> {
     match agent {
         agents::CLAUDE_CODE => claude::normalize(payload),
-        // Codex: forward its hooks with `agentsmon hook --agent codex` and map
-        // them in a `codex` module here (see docs/ARCHITECTURE.md).
+        agents::CODEX => codex::normalize(payload),
         other => Err(AdapterError::Unsupported(other.to_string())),
     }
 }
@@ -68,7 +68,8 @@ pub fn usage_from_otel(source: &OtelSource<'_>, attrs: &crate::otlp::Attrs, ts: 
     if source.service.starts_with("claude-code") || source.scope.starts_with("com.anthropic.claude_code") {
         return claude::usage_from_otel(source.body, attrs, ts);
     }
-    // Codex exports its own OpenTelemetry events; map them in `codex`.
+    // Codex's token counts come from its rollout logs (`crate::codex`): its
+    // OpenTelemetry events carry no request id to count them once by.
     None
 }
 
@@ -86,6 +87,8 @@ pub fn profile(agent: &str) -> Profile {
     match agent {
         // The plugin beats every 20 s.
         agents::CLAUDE_CODE => Profile { stale_after_ms: 65_000, lost_after_ms: 30 * 60_000 },
+        // Command hooks cannot beat. Codex ends a session left idle for 30 min
+        // and not open in a client itself; one that crashed waits for this.
         _ => Profile { stale_after_ms: 120_000, lost_after_ms: 12 * 3_600_000 },
     }
 }

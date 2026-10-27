@@ -86,6 +86,13 @@ CREATE TABLE IF NOT EXISTS token_daily (
     requests INTEGER NOT NULL,
     PRIMARY KEY (day, agent, model, source)
 );
+-- How much of each agent log file a collector has counted, so its requests
+-- count once across restarts.
+CREATE TABLE IF NOT EXISTS log_cursors (
+    name TEXT PRIMARY KEY,
+    offset INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 ";
 
 /// The token tables, finest first: the table, its time column, and what
@@ -123,6 +130,8 @@ pub enum Op {
     /// Sets the title of a stored session that is not in memory.
     Title { key: String, title: String },
     Usage(UsageRecord),
+    /// How far a log file has been counted.
+    Cursor { name: String, offset: u64, ts: i64 },
     /// Prunes and folds by the cut-offs, then gives the space back to the
     /// file system.
     Maintain(Cutoffs),
@@ -275,6 +284,10 @@ fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
                 ])?;
             }
             Op::Title { key, title } => titles.push((key, title)),
+            Op::Cursor { name, offset, ts } => {
+                tx.prepare_cached("INSERT OR REPLACE INTO log_cursors (name, offset, updated_at) VALUES (?1, ?2, ?3)")?
+                    .execute(params![name, offset as i64, ts])?;
+            }
             Op::Flush(_) => {}
             Op::Maintain(c) => {
                 tx.execute("DELETE FROM events WHERE ts < ?1", [c.events])?;
@@ -284,6 +297,8 @@ fn write_batch(conn: &mut Connection, ops: Vec<Op>) -> rusqlite::Result<()> {
                 fold(&tx, "token_usage", "ts", "COUNT(*)", "token_hourly", "hour", HOUR_MS, c.token_detail / HOUR_MS * HOUR_MS)?;
                 fold(&tx, "token_hourly", "hour", "SUM(requests)", "token_daily", "day", DAY_MS, c.token_hourly / DAY_MS * DAY_MS)?;
                 tx.execute("DELETE FROM token_daily WHERE day < ?1", [c.token_daily])?;
+                // A file this quiet is past the token history too.
+                tx.execute("DELETE FROM log_cursors WHERE updated_at < ?1", [c.token_daily])?;
             }
         }
     }
@@ -518,6 +533,12 @@ pub fn untitled_sessions(c: &Connection) -> rusqlite::Result<Vec<(String, String
          WHERE path IS NOT NULL AND json_extract(data, '$.meta.title') IS NULL ORDER BY updated_at DESC LIMIT 500",
     )?;
     stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// How far each log file a collector reads has been counted.
+pub fn log_cursors(c: &Connection) -> rusqlite::Result<Vec<(String, u64)>> {
+    let mut stmt = c.prepare("SELECT name, offset FROM log_cursors")?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?.collect()
 }
 
 /// Request ids counted since `since`, so a delivery repeated across a

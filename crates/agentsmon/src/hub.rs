@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use agentsmon_protocol::{
-    Envelope, Event, EventRecord, PROTOCOL_VERSION, Quota, QuotaSample, ServerInfo, Session, Snapshot, Summary,
-    TokenTotals, UsageRecord,
+    ContextUsage, Envelope, Event, EventRecord, PROTOCOL_VERSION, Quota, QuotaSample, RateWindow, ServerInfo, Session,
+    SessionMeta, Snapshot, Summary, TokenTotals, UsageRecord,
 };
 use axum::extract::ws::Utf8Bytes;
 use parking_lot::Mutex;
@@ -81,6 +81,14 @@ pub struct Presence {
     pub transcript: Option<String>,
 }
 
+/// What a collector read about a session, for [`Hub::observe`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Observed {
+    pub meta: Option<SessionMeta>,
+    pub context: Option<ContextUsage>,
+    pub rate_limits: Option<Vec<RateWindow>>,
+}
+
 #[derive(Debug, Default, Serialize)]
 pub struct IngestReport {
     pub accepted: usize,
@@ -118,6 +126,9 @@ const TOMBSTONE_MS: i64 = 24 * 3_600_000;
 const SEEN_WINDOW_MS: i64 = 6 * 3_600_000;
 const SEEN_MAX: usize = 50_000;
 const PENDING_MAX: usize = 1_000;
+/// Only requests this recent wait for their session: older ones (a log read
+/// back from long ago) belong to sessions that will not be reported now.
+const PENDING_WINDOW_MS: i64 = 3_600_000;
 
 impl State {
     /// The session, created on first word, picking up any token counts that
@@ -373,39 +384,8 @@ impl Hub {
             changed.push(key.clone());
         }
 
-        if let Event::Usage { rate_limits: Some(windows), .. } = &event
-            && !windows.is_empty()
-        {
-            let previous = st.quotas.get(agent);
-            // A reading older than the one held (a replayed queue) only goes to the history.
-            if previous.is_some_and(|q| ts < q.updated_at) {
-                for w in windows {
-                    self.store.send(Op::Sample(QuotaSample {
-                        agent: agent.to_string(),
-                        kind: w.kind.clone(),
-                        ts,
-                        percent_used: w.percent_used,
-                        resets_at: w.resets_at.clone(),
-                    }));
-                }
-            } else if previous.is_none_or(|q| q.windows != *windows) {
-                for w in windows {
-                    let was = previous.and_then(|q| q.windows.iter().find(|p| p.kind == w.kind));
-                    if was.is_none_or(|p| p.percent_used != w.percent_used || p.resets_at != w.resets_at) {
-                        self.store.send(Op::Sample(QuotaSample {
-                            agent: agent.to_string(),
-                            kind: w.kind.clone(),
-                            ts,
-                            percent_used: w.percent_used,
-                            resets_at: w.resets_at.clone(),
-                        }));
-                    }
-                }
-                let quota = Quota { agent: agent.to_string(), windows: windows.clone(), updated_at: ts, source: Some(key.clone()) };
-                out.push(Msg::Quota { quota: &quota }.out());
-                self.store.send(Op::Quota(quota.clone()));
-                st.quotas.insert(agent.to_string(), quota);
-            }
+        if let Event::Usage { rate_limits: Some(windows), .. } = &event {
+            self.note_quota(st, agent, &key, ts, windows, out);
         }
 
         if !event.is_ephemeral() {
@@ -414,6 +394,70 @@ impl Hub {
             out.push(Msg::Event { record: &record }.out());
             self.store.send(Op::Event(record));
         }
+    }
+
+    /// Files an account's rate-limit reading, as `source` (a session key) saw it.
+    fn note_quota(&self, st: &mut State, agent: &str, source: &str, ts: i64, windows: &[RateWindow], out: &mut Vec<Outbound>) {
+        if windows.is_empty() {
+            return;
+        }
+        let sample = |w: &RateWindow| {
+            Op::Sample(QuotaSample {
+                agent: agent.to_string(),
+                kind: w.kind.clone(),
+                ts,
+                percent_used: w.percent_used,
+                resets_at: w.resets_at.clone(),
+            })
+        };
+        let previous = st.quotas.get(agent);
+        // A reading older than the one held (a replayed queue) only goes to the history.
+        if previous.is_some_and(|q| ts < q.updated_at) {
+            for w in windows {
+                self.store.send(sample(w));
+            }
+        } else if previous.is_none_or(|q| q.windows != windows) {
+            for w in windows {
+                let was = previous.and_then(|q| q.windows.iter().find(|p| p.kind == w.kind));
+                if was.is_none_or(|p| p.percent_used != w.percent_used || p.resets_at != w.resets_at) {
+                    self.store.send(sample(w));
+                }
+            }
+            let quota = Quota { agent: agent.to_string(), windows: windows.to_vec(), updated_at: ts, source: Some(source.to_string()) };
+            out.push(Msg::Quota { quota: &quota }.out());
+            self.store.send(Op::Quota(quota.clone()));
+            st.quotas.insert(agent.to_string(), quota);
+        }
+    }
+
+    /// What a collector read about a session in the agent's own files. It
+    /// fills in a session the agent's integration reported and never creates
+    /// one; an ended session keeps its last context. The rate limits count
+    /// for the account either way. Returns whether the session is known.
+    pub fn observe(&self, agent: &str, sid: &str, ts: i64, seen: &Observed) -> bool {
+        let now = now_ms();
+        let key = Session::key_for(agent, sid);
+        let mut out = Vec::new();
+        let mut st = self.state.lock();
+        if let Some(windows) = &seen.rate_limits {
+            self.note_quota(&mut st, agent, &key, ts.min(now), windows, &mut out);
+        }
+        let known = !st.forgotten.contains_key(&key) && st.sessions.contains_key(&key);
+        if let Some(s) = st.sessions.get_mut(&key).filter(|_| known) {
+            let mut moved = seen.meta.as_ref().is_some_and(|m| s.meta.merge(m));
+            if let Some(context) = seen.context.as_ref().filter(|c| !s.is_ended() && s.context.as_ref() != Some(*c)) {
+                s.context = Some(context.clone());
+                moved = true;
+            }
+            if moved {
+                out.push(Msg::Session { session: s }.out());
+                self.store.send(Op::Session(Box::new(s.clone())));
+            }
+        }
+        self.refresh_summary(&mut st, now, &mut out);
+        drop(st);
+        self.publish(out);
+        known
     }
 
     fn refresh_summary(&self, st: &mut State, now: i64, out: &mut Vec<Outbound>) {
@@ -465,7 +509,9 @@ impl Hub {
                     if !changed.contains(&key) {
                         changed.push(key);
                     }
-                } else if st.pending_usage.len() < PENDING_MAX || st.pending_usage.contains_key(&key) {
+                } else if now - u.ts < PENDING_WINDOW_MS
+                    && (st.pending_usage.len() < PENDING_MAX || st.pending_usage.contains_key(&key))
+                {
                     st.pending_usage.entry(key).or_default().add(&t);
                 }
             }
@@ -838,6 +884,41 @@ mod tests {
         hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"late","type":"session.start"}"#)]);
         let s = hub.session("claude-code:late").unwrap();
         assert_eq!((s.stats.output_tokens, s.stats.api_requests), (4, 1));
+
+        // A request from long ago (a log read back) is counted in the ledger
+        // only: its session is not about to be reported.
+        let old = UsageRecord { ts: now_ms() - 2 * PENDING_WINDOW_MS, ..request("p2", "gone", 4) };
+        assert_eq!(hub.ingest_usage(vec![old]), 1);
+        hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"gone","type":"session.start"}"#)]);
+        assert_eq!(hub.session("claude-code:gone").unwrap().stats.api_requests, 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn observations_fill_in_known_sessions_only() {
+        let (hub, dir) = hub("observe");
+        let seen = Observed {
+            meta: Some(SessionMeta { surface: Some("desktop".into()), ..Default::default() }),
+            context: Some(ContextUsage { tokens: Some(10), window: Some(100), percent: Some(10.0) }),
+            rate_limits: Some(vec![RateWindow { kind: "five_hour".into(), percent_used: 3.0, resets_at: None }]),
+        };
+        // Unknown: no session appears, the account's limits still count.
+        assert!(!hub.observe("codex", "c", now_ms(), &seen));
+        assert!(hub.session("codex:c").is_none());
+        assert_eq!(hub.quotas()[0].windows[0].percent_used, 3.0);
+
+        hub.ingest(vec![env(r#"{"agent":"codex","sid":"c","type":"session.start"}"#)]);
+        assert!(hub.observe("codex", "c", now_ms(), &seen));
+        let s = hub.session("codex:c").unwrap();
+        assert_eq!((s.meta.surface.as_deref(), s.context.and_then(|c| c.percent)), (Some("desktop"), Some(10.0)));
+
+        // An ended session keeps its last context and stays ended.
+        hub.ingest(vec![env(r#"{"agent":"codex","sid":"c","type":"session.end"}"#)]);
+        let later = Observed { context: Some(ContextUsage { tokens: Some(90), ..Default::default() }), ..seen };
+        assert!(hub.observe("codex", "c", now_ms(), &later));
+        let s = hub.session("codex:c").unwrap();
+        assert!(s.is_ended());
+        assert_eq!(s.context.and_then(|c| c.tokens), Some(10));
         std::fs::remove_dir_all(dir).ok();
     }
 
