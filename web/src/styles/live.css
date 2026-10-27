@@ -259,10 +259,34 @@
   pointer-events: none;
 }
 @keyframes orbit { to { --angle: 360deg; } }
+/* Hovered, a card takes its state's colour instead of the instrument blue:
+   a working one warms to clay and its comet brightens */
+.card.tone-active::before { transition: filter var(--dur); }
+.card.tone-active::after {
+  background:
+    radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--clay) 18%, transparent), transparent 65%),
+    linear-gradient(160deg, color-mix(in srgb, var(--clay) 12%, transparent), transparent 60%);
+}
+.card.tone-active:hover {
+  box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px color-mix(in srgb, var(--clay) 45%, transparent), var(--shadow-md), 0 0 48px -14px var(--clay);
+}
+.card.tone-active:hover::before { filter: drop-shadow(0 0 7px var(--clay)) brightness(1.15); }
+.card.tone-active:hover .card-title h3 { color: color-mix(in srgb, var(--clay) 30%, var(--text)); }
+.card-title h3 { transition: color var(--dur); }
 /* Waiting for you: an amber ring that breathes */
 .card.tone-attention {
   box-shadow: inset 0 0 0 1.25px var(--amber), var(--shadow-md);
   animation: beckon 2.4s var(--ease-in-out) infinite;
+}
+/* ...and one waiting for you holds its breath in amber */
+.card.tone-attention::after {
+  background:
+    radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--amber) 18%, transparent), transparent 65%),
+    linear-gradient(160deg, color-mix(in srgb, var(--amber) 12%, transparent), transparent 60%);
+}
+.card.tone-attention:hover {
+  animation: none;
+  box-shadow: inset 0 0 0 1.5px var(--amber), 0 0 0 5px color-mix(in srgb, var(--amber) 16%, transparent), 0 0 48px -12px var(--amber), var(--shadow-md);
 }
 @keyframes beckon {
   0%, 100% { box-shadow: inset 0 0 0 1.25px var(--amber), 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent), var(--shadow-md); }

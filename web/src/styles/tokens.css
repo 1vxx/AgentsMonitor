@@ -65,6 +65,14 @@
   --grid-major: rgba(35, 51, 110, 0.075);
   --nebula: 0.18;
   --nebula-blend: multiply;
+  /* The logo: paper and ink */
+  --logo-a: #ffffff;
+  --logo-b: #f0f2f9;
+  --logo-c: #dfe3f1;
+  --logo-edge: rgba(35, 51, 110, 0.16);
+  --logo-ink: #23336e;
+  --logo-sat: #3a52c4;
+  --logo-shadow: rgba(35, 51, 110, 0.2);
   --grain: 0.06;
 
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
@@ -132,6 +140,13 @@
     --grid-major: rgba(150, 170, 255, 0.06);
     --nebula: 0.34;
     --nebula-blend: screen;
+    --logo-a: #2c3366;
+    --logo-b: #12152b;
+    --logo-c: #080912;
+    --logo-edge: rgba(255, 255, 255, 0.12);
+    --logo-ink: #ffffff;
+    --logo-sat: #9ec0ff;
+    --logo-shadow: rgba(80, 100, 220, 0.35);
     --grain: 0.06;
   }
 }
@@ -184,6 +199,13 @@
   --grid-major: rgba(150, 170, 255, 0.06);
   --nebula: 0.34;
   --nebula-blend: screen;
+  --logo-a: #2c3366;
+  --logo-b: #12152b;
+  --logo-c: #080912;
+  --logo-edge: rgba(255, 255, 255, 0.12);
+  --logo-ink: #ffffff;
+  --logo-sat: #9ec0ff;
+  --logo-shadow: rgba(80, 100, 220, 0.35);
   --grain: 0.06;
 }
 

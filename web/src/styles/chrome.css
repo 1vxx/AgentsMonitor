@@ -37,9 +37,16 @@
 .brand-logo { display: grid; }
 .brand-name { font: 600 15.5px/1 var(--font-display); letter-spacing: -0.02em; }
 
-.logo { display: block; overflow: visible; filter: drop-shadow(0 2px 8px rgba(80, 100, 220, 0.35)); transition: transform var(--dur-slow) var(--ease-out); }
+.logo { display: block; overflow: visible; filter: drop-shadow(0 2px 8px var(--logo-shadow)); transition: transform var(--dur-slow) var(--ease-out); }
 .brand:hover .logo { transform: rotate(-12deg) scale(1.06); }
-.logo-sat { filter: drop-shadow(0 0 2px #9ec0ff); }
+.logo-tile-a { stop-color: var(--logo-a); }
+.logo-tile-b { stop-color: var(--logo-b); }
+.logo-tile-c { stop-color: var(--logo-c); }
+.logo-edge { stroke: var(--logo-edge); }
+.logo-star { fill: var(--logo-ink); }
+.logo-orbit { stroke: var(--logo-ink); stroke-opacity: 0.8; }
+.logo-orbit-back { stroke-opacity: 0.35; }
+.logo-sat { fill: var(--logo-sat); filter: drop-shadow(0 0 2px var(--logo-sat)); }
 
 .tabs { display: flex; gap: 2px; padding: 4px; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
 .tab {
