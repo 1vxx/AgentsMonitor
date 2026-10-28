@@ -627,6 +627,31 @@ pub struct SummaryItem {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
+    /// What the session waits for, while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<AttentionBrief>,
+    /// How its last turn ended, so a display can tell a finish from a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_turn: Option<TurnBrief>,
+}
+
+/// [`Attention`] with its texts cut to fit a small screen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AttentionBrief {
+    pub kind: AttentionKind,
+    pub since: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TurnBrief {
+    pub outcome: TurnOutcome,
+    pub ended_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

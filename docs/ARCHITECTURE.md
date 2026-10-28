@@ -165,6 +165,6 @@ Neither the protocol nor the reducer changes; Codex was added this way.
 
 The ESP32 display (1.75" AMOLED) is the next phase. The data it needs is already served:
 
-- `GET /v1/summary` returns a compact summary: the overall `mood`, counts per status, the first eight sessions in the Live view's order (waiting for you, longest wait first; working, newest turn first; idle, latest to finish first; no signal last) and each agent's rate limits. The WebSocket sends a `summary` message only when the summary changes.
+- `GET /v1/summary` returns a compact summary: the overall `mood`, counts per status, the first eight sessions in the Live view's order (waiting for you, longest wait first; working, newest turn first; idle, latest to finish first; no signal last) and each agent's rate limits. Each session carries what it waits for (`attention`: the kind, the tool and its subject, cut to 120 chars) and how its last turn ended (`last_turn`), so a display can show what to approve and tell a finished turn from a failed one. The WebSocket sends a `summary` message only when the summary changes.
 - `mood` is a single signal for the animation: `attention` (someone waits for you) > `working` > `error` (a turn failed in the last 5 min) > `idle` > `offline`.
 - For access over the LAN, set `http.listen = "0.0.0.0:7788"` and `http.token`.

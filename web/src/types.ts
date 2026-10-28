@@ -127,6 +127,8 @@ export interface SummaryItem {
   since: number
   tool?: string
   stale?: boolean
+  attention?: { kind: AttentionKind; since: number; tool?: string; subject?: string; message?: string }
+  last_turn?: { outcome: TurnOutcome; ended_at: number }
 }
 
 export interface Summary {

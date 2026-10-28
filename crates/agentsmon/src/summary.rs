@@ -1,10 +1,14 @@
 //! The glanceable form of everything live: what a small display draws.
 
-use agentsmon_protocol::{Mood, Quota, QuotaBrief, Session, Status, StatusCounts, Summary, SummaryItem, TurnOutcome};
+use agentsmon_protocol::{
+    AttentionBrief, Mood, Quota, QuotaBrief, Session, Status, StatusCounts, Summary, SummaryItem, TurnBrief, TurnOutcome,
+};
 
-use crate::util::project_name;
+use crate::util::{preview, project_name};
 
 const MAX_ITEMS: usize = 8;
+/// Longest attention text a summary carries; a display shows two short lines.
+const MAX_TEXT: usize = 120;
 /// How long an errored last turn colours the mood while the session idles.
 const ERROR_MOOD_MS: i64 = 5 * 60_000;
 
@@ -74,6 +78,14 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                 since: s.status_since,
                 tool: s.tools.last().map(|t| t.tool.clone()),
                 stale: s.stale,
+                attention: s.attention.as_ref().map(|a| AttentionBrief {
+                    kind: a.kind,
+                    since: a.since,
+                    tool: a.tool.clone(),
+                    subject: a.subject.as_deref().and_then(|t| preview(t, MAX_TEXT)),
+                    message: a.message.as_deref().and_then(|t| preview(t, MAX_TEXT)),
+                }),
+                last_turn: s.last_turn.as_ref().map(|t| TurnBrief { outcome: t.outcome, ended_at: t.ended_at }),
             })
             .collect(),
         quotas: quotas
@@ -157,6 +169,23 @@ mod tests {
         let keys: Vec<_> = build(all.into_iter(), &[], 100).sessions.into_iter().map(|s| s.key).collect();
         let want = ["asked-first", "asked-next", "late-turn", "early-turn", "idle-new", "idle-long", "quiet"];
         assert_eq!(keys, want.map(|k| format!("claude-code:{k}")));
+    }
+
+    #[test]
+    fn carries_what_a_session_waits_for_and_how_it_last_ended() {
+        let mut asking = new_session("claude-code", "a", 0);
+        let command = format!("npm run build {}", "x".repeat(200));
+        apply(&mut asking, 2, &Event::Attention { kind: AttentionKind::Permission, tool: Some("Bash".into()), subject: Some(command), message: None });
+        let mut done = new_session("claude-code", "b", 0);
+        apply(&mut done, 1, &Event::TurnStart { turn_id: None, agent_id: None, preview: None });
+        apply(&mut done, 5, &Event::TurnEnd { turn_id: None, agent_id: None, outcome: TurnOutcome::Error, duration_ms: None, usage: None, preview: None });
+
+        let summary = build([&asking, &done].into_iter(), &[], 10);
+        let wait = summary.sessions[0].attention.as_ref().unwrap();
+        assert_eq!((wait.kind, wait.since, wait.tool.as_deref()), (AttentionKind::Permission, 2, Some("Bash")));
+        let subject = wait.subject.as_deref().unwrap();
+        assert!(subject.starts_with("npm run build") && subject.ends_with('…') && subject.chars().count() == MAX_TEXT);
+        assert_eq!(summary.sessions[1].last_turn, Some(TurnBrief { outcome: TurnOutcome::Error, ended_at: 5 }));
     }
 
     #[test]
