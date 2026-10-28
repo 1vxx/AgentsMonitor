@@ -8,3 +8,4 @@ device/firmware/build/
 device/firmware/agentsmon_display/build/
 device/firmware/agentsmon_display/src/
 device/firmware/agentsmon_display/secrets.h
+/web/.env.local
