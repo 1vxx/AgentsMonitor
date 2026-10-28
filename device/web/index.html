@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentsMonitor 设备界面原型</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>AgentsMonitor 设备界面原型</h1>
+      <p>左边的圆屏运行的是固件里将要用的同一份 C++ 界面代码（编译成 WebAssembly），466×466 与真机像素一一对应。</p>
+    </header>
+
+    <main>
+      <section class="device">
+        <div class="bezel" id="bezel">
+          <canvas id="screen" width="466" height="466"></canvas>
+        </div>
+        <div class="readout" id="readout">加载中…</div>
+        <p class="hint">在圆屏上用鼠标操作：点击＝轻点，按住拖动＝滑动（左右切换会话，上滑打开列表，下滑返回）。</p>
+      </section>
+
+      <section class="panel">
+        <div class="group">
+          <h2>数据来源</h2>
+          <div class="seg" id="source">
+            <button data-v="script" class="on">演示剧本</button>
+            <button data-v="live">实时 daemon</button>
+          </div>
+
+          <div id="script-box">
+            <label>剧本
+              <select id="scenario"></select>
+            </label>
+            <p class="note" id="scenario-note"></p>
+            <div class="row">
+              <button id="play">暂停</button>
+              <button id="restart">重新开始</button>
+              <label class="inline">速度
+                <select id="speed">
+                  <option value="1">1×</option>
+                  <option value="3">3×</option>
+                  <option value="10">10×</option>
+                  <option value="30">30×</option>
+                </select>
+              </label>
+              <span class="clock" id="clock"></span>
+            </div>
+          </div>
+
+          <div id="live-box" hidden>
+            <label>WebSocket 地址
+              <input id="ws-url" value="ws://127.0.0.1:7788/v1/ws" spellcheck="false" />
+            </label>
+            <div class="row">
+              <button id="ws-connect">连接</button>
+              <span class="note" id="ws-state">未连接</span>
+            </div>
+            <p class="note">需要本机运行着带 <code>attention</code> / <code>last_turn</code> 字段的新版 daemon，否则提醒卡里看不到要授权的命令。</p>
+          </div>
+        </div>
+
+        <div class="group" id="events-box">
+          <h2>手动触发</h2>
+          <div class="grid">
+            <button data-ev="permission">新会话请求授权</button>
+            <button data-ev="input">一个会话向你提问</button>
+            <button data-ev="answer">处理所有等待</button>
+            <button data-ev="done">完成一轮</button>
+            <button data-ev="error">一轮出错</button>
+            <button data-ev="start">新增工作中会话</button>
+            <button data-ev="stale">一个会话失联</button>
+            <button data-ev="end">结束一个会话</button>
+            <button data-ev="link">断开 / 恢复连接</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>声音</h2>
+          <div class="row">
+            <button id="sound">启用声音</button>
+            <label class="inline">音量 <input type="range" id="volume" min="0" max="1" step="0.05" value="0.7" /></label>
+          </div>
+          <div class="row">
+            <span class="note">试听：</span>
+            <button data-cue="0">等你</button>
+            <button data-cue="1">轻提醒</button>
+            <button data-cue="2">完成</button>
+            <button data-cue="3">出错</button>
+          </div>
+          <ol class="log" id="log"></ol>
+        </div>
+
+        <div class="group">
+          <h2>显示</h2>
+          <div class="row">
+            <label class="inline">缩放
+              <select id="zoom">
+                <option value="0.5">0.5×（接近实物大小）</option>
+                <option value="1" selected>1×（像素对应）</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×（看像素细节）</option>
+              </select>
+            </label>
+            <label class="inline">帧率
+              <select id="fps">
+                <option value="15">15（当前固件）</option>
+                <option value="25" selected>25（固件目标）</option>
+                <option value="60">60</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>当前会话</h2>
+          <table id="sessions"></table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
