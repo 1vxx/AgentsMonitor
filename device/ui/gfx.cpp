@@ -128,6 +128,19 @@ void glowAt(float x, float y, float r, uint16_t c, float alpha) {
   });
 }
 
+void vignette(float r0, float r1, uint16_t c, float alpha) {
+  int R0 = int(r0 * 16), span = int((r1 - r0) * 16);
+  uint32_t A = uint32_t(clamp01(alpha) * 32 * 256);
+  if (!A || span <= 0) return;
+  annulus(r0, r1, [&](int i) {
+    int d = dist16(pol[i]) - R0;
+    if (d <= 0) return;
+    if (d > span) d = span;
+    uint32_t t = uint32_t(d) * 256 / uint32_t(span);  // 0..256
+    add(i, c, (t * t >> 8) * A >> 16);
+  });
+}
+
 void roundRect(float x0, float y0, float x1, float y1, float radius, uint16_t c, float alpha) {
   int px0 = int(floorf(x0)), px1 = int(ceilf(x1)), py0 = int(floorf(y0)), py1 = int(ceilf(y1));
   if (px0 < 0) px0 = 0;

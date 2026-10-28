@@ -6,6 +6,9 @@
 
 #include <string.h>
 
+#include <unordered_map>
+#include <vector>
+
 #include "gfx.h"
 
 namespace text {
@@ -158,33 +161,120 @@ const uint8_t *findCjk(uint32_t cp) {
 
 // How far one character moves the pen, in font pixels
 int advance(Face f, uint32_t cp) {
-  if (cp == ' ') return f == MONO ? 6 : SPACE + 1;
-  if (const Latin *g = findLatin(cp)) return f == MONO ? 6 : g->width + 1;
-  if (const uint8_t *g = findCjk(cp)) return g[4];
-  return f == MONO ? 6 : findLatin('?')->width + 1;
+  int track = f == LABEL ? 1 : 0;
+  if (cp == ' ') return f == MONO ? 6 : SPACE + 1 + track;
+  if (const Latin *g = findLatin(cp)) return f == MONO ? 6 : g->width + 1 + track;
+  if (const uint8_t *g = findCjk(cp)) return g[4] + track;
+  return f == MONO ? 6 : findLatin('?')->width + 1 + track;
 }
 
-struct Pen {
-  int scale, clip0, clip1, fade;
-  uint32_t A;  // alpha 0..256
-  uint16_t color;
+// ---------- Lit glyphs ----------
 
-  // One font pixel at panel (x, y)
-  void dot(int x, int y) const {
-    for (int py = y; py < y + scale; py++) {
-      if (py < 0 || py >= gfx::H) continue;
-      for (int px = x; px < x + scale; px++) {
-        if (px < clip0 || px >= clip1) continue;
-        uint32_t a = A;
-        if (fade) {
-          int edge = px - clip0 < clip1 - 1 - px ? px - clip0 : clip1 - 1 - px;
-          if (edge < fade) a = a * uint32_t(edge) / uint32_t(fade);
-        }
-        gfx::blend(py * gfx::W + px, color, a >> 3);
-      }
-    }
-  }
+// A glyph at one size: for each panel pixel, how much of an LED dot covers it
+// and how much glow reaches it. Placed relative to the pen and the baseline.
+struct Sprite {
+  int16_t x0, y0, w, h;
+  uint32_t off;  // into pool: w * h pairs of (dot, glow), 0..255
 };
+std::unordered_map<uint32_t, Sprite> sprites;
+std::vector<uint8_t> pool;
+constexpr size_t POOL_MAX = 6 << 20;
+constexpr float GLOW = 0.5f;  // how bright the glow is against the dots
+
+// Lists the glyph's dots, in font pixels from the pen and the baseline
+int dots(Face f, uint32_t cp, int16_t (*out)[2], int max) {
+  int n = 0;
+  const Latin *g = cp == ' ' ? nullptr : findLatin(cp);
+  const uint8_t *h = g || cp == ' ' ? nullptr : findCjk(cp);
+  if (!g && !h && cp != ' ') g = findLatin('?');
+  if (g) {
+    int shift = f == MONO ? 0 : g->left;
+    for (int r = 0; r < ROWS; r++)
+      for (int c = 0; c < 5; c++)
+        if (g->rows[r] & 1 << (4 - c) && n < max) out[n][0] = int16_t(c - shift), out[n++][1] = int16_t(r - BASE);
+  } else if (h) {
+    int w = h[0], rows = h[1], xoff = int8_t(h[2]), yoff = int8_t(h[3]), stride = (w + 7) / 8;
+    const uint8_t *bits = h + 5;
+    int top = -(yoff + rows);
+    for (int r = 0; r < rows; r++)
+      for (int c = 0; c < w; c++)
+        if (bits[r * stride + c / 8] & 0x80 >> (c % 8) && n < max) out[n][0] = int16_t(xoff + c), out[n++][1] = int16_t(top + r);
+  }
+  return n;
+}
+
+const Sprite &sprite(Face f, int scale, uint32_t cp) {
+  Face shape = f == LABEL ? PROP : f;  // tracking moves the pen, not the dots
+  uint32_t key = uint32_t(shape) << 30 | uint32_t(scale & 0x3F) << 24 | (cp & 0xFFFFFF);
+  auto hit = sprites.find(key);
+  if (hit != sprites.end()) return hit->second;
+  if (pool.size() > POOL_MAX) sprites.clear(), pool.clear();
+
+  static int16_t at[200][2];
+  int n = dots(shape, cp, at, 200);
+  Sprite s = {0, 0, 0, 0, uint32_t(pool.size())};
+  if (!n) return sprites.emplace(key, s).first->second;
+
+  int x0 = at[0][0], x1 = x0, y0 = at[0][1], y1 = y0;
+  for (int k = 1; k < n; k++) {
+    x0 = at[k][0] < x0 ? at[k][0] : x0, x1 = at[k][0] > x1 ? at[k][0] : x1;
+    y0 = at[k][1] < y0 ? at[k][1] : y0, y1 = at[k][1] > y1 ? at[k][1] : y1;
+  }
+  float sigma = 0.85f * scale;
+  int pad = int(ceilf(sigma * 3)) + 1;
+  s.x0 = int16_t(x0 * scale - pad), s.y0 = int16_t(y0 * scale - pad);
+  s.w = int16_t((x1 - x0 + 1) * scale + 2 * pad), s.h = int16_t((y1 - y0 + 1) * scale + 2 * pad);
+  int W = s.w, H = s.h;
+
+  // Round dots, each antialiased from a 4x4 sample grid
+  std::vector<float> core(W * H, 0.f), glow(W * H, 0.f), tmp(W * H, 0.f);
+  float rd = scale * 0.5f - 0.22f;
+  for (int k = 0; k < n; k++) {
+    float cx = (at[k][0] + 0.5f) * scale - s.x0, cy = (at[k][1] + 0.5f) * scale - s.y0;
+    for (int py = int(cy - rd - 1); py <= int(cy + rd + 1); py++)
+      for (int px = int(cx - rd - 1); px <= int(cx + rd + 1); px++) {
+        if (px < 0 || py < 0 || px >= W || py >= H) continue;
+        int hits = 0;
+        for (int sy = 0; sy < 4; sy++)
+          for (int sx = 0; sx < 4; sx++) {
+            float dx = px + (sx + 0.5f) / 4 - cx, dy = py + (sy + 0.5f) / 4 - cy;
+            hits += dx * dx + dy * dy <= rd * rd;
+          }
+        float c = hits / 16.f;
+        if (c > core[py * W + px]) core[py * W + px] = c;
+      }
+  }
+  // The glow: the dots blurred, in two passes
+  int R = pad;
+  std::vector<float> kernel(2 * R + 1);
+  float sum = 0;
+  for (int k = -R; k <= R; k++) sum += kernel[k + R] = expf(-k * k / (2 * sigma * sigma));
+  for (float &k : kernel) k /= sum;
+  for (int y = 0; y < H; y++)
+    for (int x = 0; x < W; x++) {
+      float a = 0;
+      for (int k = -R; k <= R; k++)
+        if (x + k >= 0 && x + k < W) a += core[y * W + x + k] * kernel[k + R];
+      tmp[y * W + x] = a;
+    }
+  for (int y = 0; y < H; y++)
+    for (int x = 0; x < W; x++) {
+      float a = 0;
+      for (int k = -R; k <= R; k++)
+        if (y + k >= 0 && y + k < H) a += tmp[(y + k) * W + x] * kernel[k + R];
+      glow[y * W + x] = a;
+    }
+  pool.resize(pool.size() + W * H * 2);
+  uint8_t *out = &pool[s.off];
+  for (int i = 0; i < W * H; i++) {
+    out[i * 2] = uint8_t(core[i] * 255 + 0.5f);
+    float g = glow[i] * 1.8f;
+    out[i * 2 + 1] = uint8_t((g > 1 ? 1 : g) * 255 + 0.5f);
+  }
+  return sprites.emplace(key, s).first->second;
+}
+
+int rowClip0 = 0, rowClip1 = gfx::H;
 
 void put(char *&out, char *end, uint32_t cp) {
   char buf[4];
@@ -238,6 +328,7 @@ bool init(const uint8_t *data, size_t len) {
     cjkOffsets = cjkCodes + cjkCount * 4;
     cjkData = cjkOffsets + cjkCount * 4;
   }
+  sprites.clear(), pool.clear();
   return true;
 }
 
@@ -261,41 +352,82 @@ uint32_t next(const char *&s) {
 int width(Face f, int scale, const char *s) {
   int w = 0;
   while (uint32_t cp = next(s)) w += advance(f, cp);
-  return w ? (w - 1) * scale : 0;  // no gap after the last letter
+  return w ? (w - 1 - (f == LABEL)) * scale : 0;  // no gap after the last letter
+}
+
+void clipRows(int y0, int y1) {
+  rowClip0 = y0 < 0 ? 0 : y0;
+  rowClip1 = y1 > gfx::H ? gfx::H : y1;
 }
 
 int draw(Face f, int scale, const char *s, float x, int y, uint16_t color, float alpha, int clip0, int clip1, int fade) {
-  Pen pen = {scale, clip0 < 0 ? 0 : clip0, clip1 > gfx::W ? gfx::W : clip1, fade, uint32_t(gfx::clamp01(alpha) * 256), color};
+  if (clip0 < 0) clip0 = 0;
+  if (clip1 > gfx::W) clip1 = gfx::W;
+  uint32_t A = uint32_t(gfx::clamp01(alpha) * 256);
+  if (!A) return 0;
+  uint32_t G = uint32_t(GLOW * 256);
   int at = int(floorf(x + 0.5f)), start = at;
   while (uint32_t cp = next(s)) {
     int adv = advance(f, cp) * scale;
-    if (at >= pen.clip1 || at + adv <= pen.clip0) {
-      at += adv;
-      continue;
-    }
-    const Latin *g = cp == ' ' ? nullptr : findLatin(cp);
-    const uint8_t *h = g || cp == ' ' ? nullptr : findCjk(cp);
-    if (!g && !h && cp != ' ') g = findLatin('?');
-    if (g) {
-      int shift = f == MONO ? 0 : g->left;
-      for (int r = 0; r < ROWS; r++)
-        for (int c = 0; c < 5; c++)
-          if (g->rows[r] & 1 << (4 - c)) pen.dot(at + (c - shift) * scale, y + (r - BASE) * scale);
-    } else if (h) {
-      int w = h[0], rows = h[1], xoff = int8_t(h[2]), yoff = int8_t(h[3]), stride = (w + 7) / 8;
-      const uint8_t *bits = h + 5;
-      int top = -(yoff + rows);  // font pixels above the baseline to the first row
-      for (int r = 0; r < rows; r++)
-        for (int c = 0; c < w; c++)
-          if (bits[r * stride + c / 8] & 0x80 >> (c % 8)) pen.dot(at + (xoff + c) * scale, y + (top + r) * scale);
-    }
+    const Sprite &sp = sprite(f, scale, cp);
+    int gx = at + sp.x0, gy = y + sp.y0;
     at += adv;
+    if (!sp.w || gx >= clip1 || gx + sp.w <= clip0) continue;
+    const uint8_t *px = &pool[sp.off];
+    for (int r = 0; r < sp.h; r++) {
+      int py = gy + r;
+      if (py < rowClip0 || py >= rowClip1) continue;
+      const uint8_t *row = px + r * sp.w * 2;
+      for (int c = 0; c < sp.w; c++) {
+        uint32_t dot = row[c * 2], glow = row[c * 2 + 1];
+        if (!dot && !glow) continue;
+        int pxx = gx + c;
+        if (pxx < clip0 || pxx >= clip1) continue;
+        uint32_t a = A;
+        if (fade) {
+          int edge = pxx - clip0 < clip1 - 1 - pxx ? pxx - clip0 : clip1 - 1 - pxx;
+          if (edge < fade) a = a * uint32_t(edge) / uint32_t(fade);
+        }
+        int i = py * gfx::W + pxx;
+        // The dot, then its light over it and round it, which runs hot at the centre
+        if (dot) gfx::blend(i, color, (dot * a + 1024) >> 11);
+        if (glow) gfx::add(i, color, (glow * a * G) >> 19);
+      }
+    }
   }
   return at - start;
 }
 
 void centre(Face f, int scale, const char *s, float cx, int y, uint16_t color, float alpha) {
   draw(f, scale, s, cx - width(f, scale, s) / 2.f, y, color, alpha);
+}
+
+void roll(Face f, int scale, const char *now, const char *was, float roll, float cx, int y, uint16_t color, float alpha) {
+  if (roll >= 1 || !digitsOnly(now, was)) {
+    centre(f, scale, now, cx, y, color, alpha);
+    return;
+  }
+  float x = cx - width(f, scale, now) / 2.f;
+  int lift = cap(scale) + 3 * scale;
+  int keep0 = rowClip0, keep1 = rowClip1;
+  clipRows(y - cap(scale) - 2 * scale, y + scale);
+  const char *a = now, *b = was;
+  while (*a) {
+    const char *a0 = a, *b0 = b;
+    uint32_t ca = next(a), cb = next(b);
+    char one[8] = {0}, old[8] = {0};
+    memcpy(one, a0, a - a0);
+    memcpy(old, b0, b - b0);
+    if (ca == cb) {
+      draw(f, scale, one, x, y, color, alpha);
+    } else {
+      // The old digit leaves upward as the new one comes up from below
+      draw(f, scale, old, x, y - int(roll * lift), color, alpha * (1 - roll));
+      draw(f, scale, one, x, y + int((1 - roll) * lift), color, alpha * roll);
+    }
+    x += advance(f, ca) * scale;
+  }
+  rowClip0 = keep0, rowClip1 = keep1;
 }
 
 void fit(Face f, int scale, const char *s, int maxW, char *out, size_t outLen) {
@@ -338,7 +470,8 @@ int wrap(Face f, int scale, const char *s, int maxW, char (*lines)[160], int max
       w += a;
       p = q;
     }
-    const char *cut = *p && space ? space : p;
+    // Commands and paths (MONO) break anywhere, so a line holds as much as it can
+    const char *cut = *p && space && f != MONO ? space : p;
     char *o = lines[n], *end = lines[n] + 160;
     *o = 0;
     for (const char *q = s; q < cut;) put(o, end, next(q));
@@ -352,6 +485,13 @@ void upper(const char *s, char *out, size_t outLen) {
   size_t i = 0;
   for (; s[i] && i + 1 < outLen; i++) out[i] = s[i] >= 'a' && s[i] <= 'z' ? char(s[i] - 32) : s[i];
   out[i] = 0;
+}
+
+bool digitsOnly(const char *a, const char *b) {
+  if (strlen(a) != strlen(b)) return false;
+  for (; *a; a++, b++)
+    if (*a != *b && !((*a >= '0' && *a <= '9') && (*b >= '0' && *b <= '9'))) return false;
+  return true;
 }
 
 }  // namespace text

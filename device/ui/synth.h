@@ -8,7 +8,7 @@ namespace synth {
 
 enum Cue { ATTENTION, REMIND, DONE, ERROR, CUES };
 constexpr int RATE = 24000;
-constexpr int MAX_SAMPLES = RATE * 3 / 2;
+constexpr int MAX_SAMPLES = RATE * 9 / 4;
 
 // Renders the cue as mono 16-bit samples; returns how many
 int render(Cue cue, int16_t *out, int max);

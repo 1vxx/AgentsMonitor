@@ -132,5 +132,7 @@ void ringAt(float x, float y, float r, float w, uint16_t c, float alpha);
 void discAt(float x, float y, float r, uint16_t c, float alpha = 1);
 void glowAt(float x, float y, float r, uint16_t c, float alpha);
 void roundRect(float x0, float y0, float x1, float y1, float radius, uint16_t c, float alpha = 1);
+// Light added in colour c that rises from nothing at radius r0 to `alpha` at r1
+void vignette(float r0, float r1, uint16_t c, float alpha);
 
 }  // namespace gfx

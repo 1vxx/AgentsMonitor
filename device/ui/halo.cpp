@@ -150,7 +150,19 @@ void orb(float cx, float cy, float R, const Palette &p, const Motion &m) {
       // The inset shadow that darkens the lower right
       float hx = u + 0.16f, hy = v + 0.2f;
       float lit = 1 - 0.18f * (1 - phi((1 - hx * hx - hy * hy) / 0.4f));
-      cells[gy * CELLS + gx] = gfx::c565({r * lit, g * lit, b * lit});
+      r *= lit, g *= lit, b *= lit;
+      // Glass: a lit rim and light bounced up from below, in --m2; a soft
+      // highlight up and to the left with a small glint in it
+      float rr = u * u + v * v;
+      float rim = rr > 0.6f ? smooth(gfx::clamp01((rr - 0.6f) / 0.4f)) * 0.3f : 0;
+      float bx = u / 0.55f, by = (v - 0.66f) / 0.2f, b2 = bx * bx + by * by;
+      float light = rim + (b2 < 1 ? (1 - b2) * 0.16f : 0);
+      r += (p.m2.r - r) * light, g += (p.m2.g - g) * light, b += (p.m2.b - b) * light;
+      float sx = (u + 0.34f) / 0.5f, sy = (v + 0.44f) / 0.32f, s2 = sx * sx + sy * sy;
+      float tx = (u + 0.40f) / 0.11f, ty = (v + 0.50f) / 0.08f, t2 = tx * tx + ty * ty;
+      float shine = (s2 < 1 ? (1 - s2) * (1 - s2) * 0.42f : 0) + (t2 < 1 ? (1 - t2) * 0.55f : 0);
+      r += (255 - r) * shine, g += (255 - g) * shine, b += (255 - b) * shine;
+      cells[gy * CELLS + gx] = gfx::c565({r, g, b});
     }
   }
 
@@ -185,18 +197,57 @@ void orb(float cx, float cy, float R, const Palette &p, const Motion &m) {
   }
 }
 
-void scale(float turn, RGB majorColor, float alpha) {
+void stars(float seconds, float alpha) {
+  struct Star {
+    float a, r, bright, rate, phase;
+  };
+  static Star sky[120];
+  static bool made;
+  if (!made) {
+    uint32_t seed = 0x9E3779B9u;
+    auto rnd = [&] {
+      seed = seed * 1664525u + 1013904223u;
+      return (seed >> 8) / 16777216.f;
+    };
+    for (Star &s : sky) s = {rnd(), 26 + 200 * sqrtf(rnd()), 0.1f + 0.5f * rnd() * rnd(), 0.06f + 0.22f * rnd(), rnd()};
+    made = true;
+  }
+  uint16_t c = gfx::c565(hex(0xd8deff));
+  float turn = seconds / 1200;
+  for (const Star &s : sky) {
+    float a = (s.a + turn) * gfx::TAU;
+    float x = gfx::CX + sinf(a) * s.r - 0.5f, y = gfx::CY - cosf(a) * s.r - 0.5f;
+    float k = s.bright * (0.55f + 0.45f * sinf((seconds * s.rate + s.phase) * gfx::TAU)) * alpha * 32;
+    // Spread over four pixels so a star glides rather than steps
+    int x0 = int(floorf(x)), y0 = int(floorf(y));
+    float fx = x - x0, fy = y - y0;
+    if (x0 < 0 || y0 < 0 || x0 >= gfx::W - 1 || y0 >= gfx::H - 1) continue;
+    int i = y0 * gfx::W + x0;
+    gfx::add(i, c, uint32_t(k * (1 - fx) * (1 - fy)));
+    gfx::add(i + 1, c, uint32_t(k * fx * (1 - fy)));
+    gfx::add(i + gfx::W, c, uint32_t(k * (1 - fx) * fy));
+    gfx::add(i + gfx::W + 1, c, uint32_t(k * fx * fy));
+  }
+}
+
+void scale(float turn, RGB majorColor, float alpha, float sweep) {
   static uint8_t kind[120];
   static int len16[3], half16[3];
+  static uint16_t shine[128];  // the sweep's brightening, by angular distance
+  constexpr int SHINE_SPAN = 0x1400;  // about 28 degrees either side
   if (!len16[0]) {
     for (int n = 0; n < 120; n++) kind[n] = n % 10 == 0 ? 2 : n % 5 == 0 ? 1 : 0;
     const float len[3] = {4.5f, 7.5f, 13}, width[3] = {1.3f, 1.3f, 1.9f};
     for (int k = 0; k < 3; k++) len16[k] = int(len[k] * 16), half16[k] = int((width[k] / 2 + 0.5f) * 16);
+    for (int k = 0; k < 128; k++) {
+      float d = k / 128.f * SHINE_SPAN / 65536.f / 0.035f;
+      shine[k] = uint16_t(256 + 380 * expf(-d * d));
+    }
   }
   uint16_t major = gfx::c565(majorColor), minor = gfx::c565(TEXT);
   uint32_t A = uint32_t(gfx::clamp01(alpha) * 256);
   constexpr int BASE16 = int(R_TICK * 16);
-  uint32_t start = gfx::angle16(turn);
+  uint32_t start = gfx::angle16(turn), lightAt = gfx::angle16(sweep);
   gfx::annulus(R_TICK - 1, R_TICK + 14, [&](int i) {
     uint32_t p = gfx::pol[i];
     int r16 = gfx::dist16(p);
@@ -212,22 +263,38 @@ void scale(float turn, RGB majorColor, float alpha) {
     int across = half16[k] - int(uint32_t(off < 0 ? -off : off) * uint32_t(r16) / 1251662u);
     if (across <= 0) return;
     uint32_t a = uint32_t(across > 16 ? 16 : across) * uint32_t(along > 16 ? 16 : along) >> 3;
-    if (k == 2)
-      gfx::blend(i, major, a * A >> 8);
-    else
-      gfx::blend(i, minor, (a * 33 >> 7) * A >> 8);  // at 26%
+    int off16 = int(int16_t((p >> 16) - lightAt));
+    if (off16 < 0) off16 = -off16;
+    uint32_t lit = off16 < SHINE_SPAN ? shine[off16 * 128 / SHINE_SPAN] : 256;
+    uint32_t AL = A * lit >> 8;
+    if (k == 2) {
+      uint32_t v = a * AL >> 8;
+      gfx::blend(i, major, v > 32 ? 32 : v);
+    } else {
+      uint32_t v = (a * 33 >> 7) * AL >> 8;  // at 26%
+      gfx::blend(i, minor, v > 32 ? 32 : v);
+    }
   });
 }
 
-void tail(float r, float head, float span, uint16_t c, float alpha) { gfx::arc(r, 4, head - span, head, c, 0, alpha); }
+void tail(float r, float head, float span, uint16_t c, float alpha) {
+  // A wide faint wake with a bright thread down its middle, both fading out
+  gfx::arc(r, 7, head - span, head, c, 0, alpha * 0.35f);
+  gfx::arc(r, 2.4f, head - span * 0.8f, head, c, 0, alpha);
+}
 
-void satellite(float x, float y, float radius, uint16_t c, float glow, bool hollow) {
-  if (glow > 0.01f) gfx::glowAt(x, y, radius + 14, c, 0.55f * glow);
-  gfx::discAt(x, y, radius + 3, 0);
-  if (hollow)
-    gfx::ringAt(x, y, radius - 1.2f, 2.4f, c, 1);
-  else
-    gfx::discAt(x, y, radius, c);
+void satellite(float x, float y, float radius, uint16_t c, float glow, bool hollow, float alpha) {
+  if (alpha <= 0.01f) return;
+  if (glow > 0.01f) gfx::glowAt(x, y, radius + 20, c, 0.5f * glow * alpha);
+  gfx::discAt(x, y, radius + 2.5f, 0, alpha);
+  if (hollow) {
+    gfx::ringAt(x, y, radius - 1.2f, 2.2f, c, alpha);
+    return;
+  }
+  gfx::discAt(x, y, radius, c, alpha);
+  // A glint up and to the left, like the orb's
+  RGB body = rgb(c);
+  gfx::discAt(x - radius * 0.32f, y - radius * 0.36f, radius * 0.42f, gfx::c565(gfx::mix(body, hex(0xffffff), 0.6f)), 0.85f * alpha);
 }
 
 }  // namespace halo
