@@ -41,6 +41,12 @@ uint16_t glowLut[16 * 256];
 constexpr int MAX_N = 96;
 uint16_t cells[MAX_N * MAX_N];  // in the panel's order: the inside goes straight down
 uint32_t *shares;               // per cell: m1, m2, m3 and white, 0..255 each, low byte first
+// A finer grid the orb is growing into, worked out a slice of rows a frame
+// while the coarser one is still drawn, and taken over once complete
+uint32_t *nextShares;
+uint16_t *nextCells;
+int nextN, nextEvery, nextDone;
+bool nextRecolour;
 // The still shading of a cell, folded into how much of its blob colours it
 // keeps and the --m2 light added over them, out of 255 in 1/256 steps; and
 // its white. In integers: the ESP32's FPU stalls on every result it needs
@@ -93,7 +99,9 @@ Palette mix(const Palette &a, const Palette &b, float t) {
 bool init() {
   glowMap = (uint8_t *)gfx::bigAlloc(GQ * GQ);
   shares = (uint32_t *)gfx::bigAlloc(MAX_N * MAX_N * 4);
-  if (!glowMap || !shares) return false;
+  nextShares = (uint32_t *)gfx::bigAlloc(MAX_N * MAX_N * 6);
+  nextCells = (uint16_t *)(nextShares + MAX_N * MAX_N);
+  if (!glowMap || !shares || !nextShares) return false;
   for (int y = 0; y < GQ; y++)
     for (int x = 0; x < GQ; x++) {
       float dx = 4 * x + 2 - OX, dy = 4 * y + 2 - OY;
@@ -165,20 +173,30 @@ HOT void drawBackground(bool dark, float cx, float cy, float cover) {
 }  // namespace
 
 void background(RGB m1, float strength, float cx, float cy, float cover) {
-  static const uint8_t BAYER[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
   // Worked out again only for a change that can show: colours ease toward
-  // where they are going for ever, in ever smaller steps
+  // where they are going for ever, in ever smaller steps. As the screens
+  // change it changes every frame, so half the strengths on each core.
   static int last[4] = {-1};
   int key[4] = {int(m1.r * 4), int(m1.g * 4), int(m1.b * 4), int(strength * 2048)};
   if (memcmp(key, last, sizeof key)) {
     memcpy(last, key, sizeof key);
-    for (int a = 0; a < 256; a++) {
-      RGB c = gfx::scale(m1, a / 255.f * strength);
-      for (int d = 0; d < 16; d++) {
-        float k = (BAYER[d] + 0.5f) / 16;
-        glowLut[d * 256 + a] = a && strength > 0 ? gfx::swap(gfx::c565({c.r + 8 * k, c.g + 4 * k, c.b + 8 * k})) : 0;
-      }
-    }
+    struct Glow {
+      RGB m1;
+      float strength;
+    } glow = {m1, strength};
+    gfx::split(
+        [](int half, void *arg) {
+          static const uint8_t BAYER[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+          const Glow &g = *(const Glow *)arg;
+          for (int a = half * 128; a < half * 128 + 128; a++) {
+            RGB c = gfx::scale(g.m1, a / 255.f * g.strength);
+            for (int d = 0; d < 16; d++) {
+              float k = (BAYER[d] + 0.5f) / 16;
+              glowLut[d * 256 + a] = a && g.strength > 0 ? gfx::swap(gfx::c565({c.r + 8 * k, c.g + 4 * k, c.b + 8 * k})) : 0;
+            }
+          }
+        },
+        &glow);
   }
   bool dark = strength <= 0;
   if (gfx::recording) return gfx::keep(0, gfx::H, [=] { drawBackground(dark, cx, cy, cover); });
@@ -233,7 +251,9 @@ struct Placed {
 };
 struct Grid {
   int N, every, phase;  // the rows that move: those at `phase` of each `every`
-  bool recolour;  // a new palette, for every row
+  bool recolour;        // a new palette, for every row
+  uint32_t *shares;
+  uint16_t *cells;
   Placed blobs[3];
   // A blob's reach into a cell, (r^2 - d^2) k + 1/2, falls apart into a part
   // for the row and one for the column: the columns', worked out once, in
@@ -305,8 +325,8 @@ HOT void place(const Grid &g, int gy0, int gy1) {
           w2 += a;
       }
       uint32_t keep = st.keep[i];
-      shares[i] = ((w0 * keep >> 15) + 128) >> 8 | ((w1 * keep >> 15) + st.light[i]) >> 8 << 8 |
-                  ((w2 * keep >> 15) + 128) >> 8 << 16 | uint32_t(st.white[i]) << 24;
+      g.shares[i] = ((w0 * keep >> 15) + 128) >> 8 | ((w1 * keep >> 15) + st.light[i]) >> 8 << 8 |
+                    ((w2 * keep >> 15) + 128) >> 8 << 16 | uint32_t(st.white[i]) << 24;
     }
   }
 }
@@ -322,14 +342,29 @@ HOT void colour(const Grid &g, int gy0, int gy1) {
     for (int gx = 0; gx < N; gx++) {
       int i = gy * N + gx;
       if (!st.inside[i]) continue;
-      uint32_t s = shares[i], s1 = s & 255, s2 = s >> 8 & 255, s3 = s >> 16 & 255, sw = s >> 24;
+      uint32_t s = g.shares[i], s1 = s & 255, s2 = s >> 8 & 255, s3 = s >> 16 & 255, sw = s >> 24;
       int c[3];
       for (int ch = 0; ch < 3; ch++) {
         uint32_t v = (s1 * pal[0][ch] + s2 * pal[1][ch] + s3 * pal[2][ch] + sw * 255) * 257 >> 16;
         c[ch] = v > 255 ? 255 : int(v);
       }
-      cells[i] = gfx::swap(uint16_t((c[0] & 0xF8) << 8 | (c[1] & 0xFC) << 3 | c[2] >> 3));
+      g.cells[i] = gfx::swap(uint16_t((c[0] & 0xF8) << 8 | (c[1] & 0xFC) << 3 | c[2] >> 3));
     }
+}
+
+// Moves the blobs and colours the rows g asks for: the top half on one
+// core, the bottom on the other
+void update(Grid &g, const Motion &m) {
+  placeBlobs(g, m);
+  still(g.N);
+  gfx::split(
+      [](int half, void *arg) {
+        const Grid &g = *(const Grid *)arg;
+        int gy0 = half ? g.N / 2 : 0, gy1 = half ? g.N : g.N / 2;
+        place(g, gy0, gy1);
+        colour(g, gy0, gy1);
+      },
+      &g);
 }
 
 HOT void drawOrb(float cx, float cy, float R, int N) {
@@ -385,38 +420,66 @@ uint32_t gridTicks;
 void newFrame(float dt) { frameNo++, frameDt = dt; }
 
 void orb(float cx, float cy, float R, const Palette &p, const Motion &m, bool settled) {
-  int N = R >= 48 ? MAX_N : R >= 24 ? MAX_N / 2 : MAX_N / 4;
-  if (sharesFrame != frameNo || sharesN != N) {
+  int want = R >= 48 ? MAX_N : R >= 24 ? MAX_N / 2 : MAX_N / 4;
+  if (sharesFrame != frameNo) {
     uint32_t t0 = gfx::ticks();
-    static Grid g;
-    g.N = N;
-    // Drifting slowly, the blobs move only some of the rows each frame, so
-    // that none is more than about 60 ms behind
-    bool share = settled && sharesN == N && sharesFrame + 1 == frameNo;
-    g.every = share ? frameDt > 0.03f ? 2 : frameDt > 0.015f ? 3 : 4 : 1;
-    g.phase = int(frameNo % uint32_t(g.every));
-    placeBlobs(g, m);
+    static Grid live, next;
     // A new colour reaches every cell; otherwise only the rows that moved
     // need colouring again
+    int pal[3][3];
     const RGB *cs[3] = {&p.m1, &p.m2, &p.m3};
     for (int k = 0; k < 3; k++) {
-      g.pal[k][0] = gfx::clamp8(cs[k]->r + 0.5f), g.pal[k][1] = gfx::clamp8(cs[k]->g + 0.5f), g.pal[k][2] = gfx::clamp8(cs[k]->b + 0.5f);
+      pal[k][0] = gfx::clamp8(cs[k]->r + 0.5f), pal[k][1] = gfx::clamp8(cs[k]->g + 0.5f), pal[k][2] = gfx::clamp8(cs[k]->b + 0.5f);
     }
-    g.recolour = memcmp(g.pal, lastPal, sizeof g.pal) != 0;
-    memcpy(lastPal, g.pal, sizeof g.pal);
-    // The top half on one core, the bottom on the other
-    still(N);
-    gfx::split(
-        [](int half, void *arg) {
-          const Grid &g = *(const Grid *)arg;
-          int gy0 = half ? g.N / 2 : 0, gy1 = half ? g.N : g.N / 2;
-          place(g, gy0, gy1);
-          colour(g, gy0, gy1);
-        },
-        &g);
+    bool recolour = memcmp(pal, lastPal, sizeof pal) != 0;
+    memcpy(lastPal, pal, sizeof pal);
+    // Drifting slowly, the blobs move only some of the rows each frame, so
+    // that none is more than about 60 ms behind
+    bool steady = settled && sharesN && sharesFrame + 1 == frameNo;
+    int every = frameDt > 0.03f ? 2 : frameDt > 0.015f ? 3 : 4;
+    // The finest grid is the one that costs. An orb growing fast toward it
+    // has it worked out ahead, a slice of rows a frame, while it is drawn
+    // from the next grid down; and keeps it once it has it.
+    static float lastR;
+    bool rising = R - lastR > 0.5f;
+    lastR = R;
+    bool keepFine = sharesN == MAX_N && rising;
+    bool grow = !keepFine && steady && sharesN < MAX_N && (want == MAX_N || (rising && R >= 30));
+    int N = keepFine ? MAX_N : grow && want == MAX_N ? MAX_N / 2 : want;
+    live.N = N, live.every = steady && sharesN == N ? every : 1, live.phase = int(frameNo % uint32_t(live.every));
+    live.recolour = recolour, live.shares = shares, live.cells = cells;
+    memcpy(live.pal, pal, sizeof pal);
+    update(live, m);
+    sharesN = N;
+    if (!grow) {
+      nextN = 0;
+    } else {
+      if (nextN != MAX_N) nextN = MAX_N, nextEvery = every, nextDone = 0, nextRecolour = false;
+      next.N = MAX_N, next.every = nextEvery, next.phase = nextDone, next.recolour = false;
+      next.shares = nextShares, next.cells = nextCells;
+      memcpy(next.pal, pal, sizeof pal);
+      update(next, m);
+      nextRecolour |= nextDone > 0 && recolour;
+      if (++nextDone == nextEvery) {
+        memcpy(shares, nextShares, MAX_N * MAX_N * 4);
+        memcpy(cells, nextCells, MAX_N * MAX_N * 2);
+        sharesN = MAX_N, nextN = 0;
+        // Rows worked out under an older colour take the new one
+        if (nextRecolour) {
+          live.N = MAX_N, live.every = 1, live.phase = 0, live.recolour = true;
+          gfx::split(
+              [](int half, void *arg) {
+                const Grid &g = *(const Grid *)arg;
+                colour(g, half ? g.N / 2 : 0, half ? g.N : g.N / 2);
+              },
+              &live);
+        }
+      }
+    }
     gridTicks += gfx::ticks() - t0;
-    sharesFrame = frameNo, sharesN = N;
+    sharesFrame = frameNo;
   }
+  int N = sharesN;
   if (gfx::recording) return gfx::keep(cy - R - 1, cy + R + 1, [=] { drawOrb(cx, cy, R, N); });
   drawOrb(cx, cy, R, N);
 }

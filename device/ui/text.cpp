@@ -4,6 +4,7 @@
 
 #include "text.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <unordered_map>
@@ -173,6 +174,35 @@ int advance(Face f, uint32_t cp) {
 
 // ---------- Lit glyphs ----------
 
+// Bytes kept in blocks that never move as more are added: a vector that
+// grew would copy everything it holds, megabytes of PSRAM in one frame
+struct Store {
+  static constexpr size_t BLOCK = 256 << 10;
+  std::vector<uint8_t *> blocks;
+  size_t used = BLOCK;  // in the last block
+
+  // n zeroed bytes, n at most BLOCK; their offset, or ~0u if out of memory
+  uint32_t add(size_t n) {
+    if (used + n > BLOCK) {
+      uint8_t *b = (uint8_t *)gfx::bigAlloc(BLOCK);
+      if (!b) return ~0u;
+      blocks.push_back(b);
+      used = 0;
+    }
+    uint32_t off = uint32_t((blocks.size() - 1) * BLOCK + used);
+    memset(blocks.back() + used, 0, n);
+    used += (n + 3) & ~size_t(3);
+    return off;
+  }
+  uint8_t *at(uint32_t off) const { return blocks[off / BLOCK] + off % BLOCK; }
+  size_t size() const { return blocks.size() * BLOCK; }
+  void clear() {
+    for (uint8_t *b : blocks) free(b);
+    blocks.clear();
+    used = BLOCK;
+  }
+};
+
 // A glyph at one size: for each panel pixel, how much of an LED dot covers it
 // and how much glow reaches it. Placed relative to the pen and the baseline.
 struct Sprite {
@@ -181,7 +211,7 @@ struct Sprite {
                  // row's first and last lit column
 };
 std::unordered_map<uint32_t, Sprite> sprites;
-std::vector<uint8_t> pool;
+Store pool;
 constexpr size_t POOL_MAX = 6 << 20;
 constexpr float GLOW = 0.5f;  // how bright the glow is against the dots
 // A glyph pixel keeps its dot and its glow in four bits each: the dot's
@@ -192,6 +222,8 @@ const uint8_t DOT[16] = {0, 16, 32, 48, 64, 80, 96, 112, 128, 143, 159, 175, 191
 inline uint32_t glowOf(uint32_t v) { return v ? v << 4 | 8 : 0; }
 // gfx::ticks() left this frame for rendering glyphs not seen before
 uint32_t budget;
+// What sprite() gives for a glyph it cannot render this frame
+const Sprite LATER = {};
 
 // One dot at a size: how much of each pixel of its cell it covers,
 // antialiased from a 4x4 sample grid, and its glow, the coverage blurred,
@@ -261,13 +293,12 @@ const Sprite &sprite(Face f, int scale, uint32_t cp) {
   auto hit = sprites.find(key);
   if (hit != sprites.end()) return hit->second;
   // Past this frame's share of rendering, a new glyph waits for the next
-  static const Sprite none = {};
-  if (!budget) return none;
+  if (!budget) return LATER;
   uint32_t t0 = gfx::ticks();
 
   static int16_t at[200][2];
   int n = dots(shape, cp, at, 200);
-  Sprite s = {0, 0, 0, 0, uint32_t(pool.size())};
+  Sprite s = {0, 0, 0, 0, 0};
   if (!n) return sprites.emplace(key, s).first->second;
 
   int x0 = at[0][0], x1 = x0, y0 = at[0][1], y1 = y0;
@@ -295,8 +326,9 @@ const Sprite &sprite(Face f, int scale, uint32_t cp) {
       for (int x = 0; x < G; x++) row[x] += from[x];
     }
   }
-  pool.resize(pool.size() + W * H + H * 2);
-  uint8_t *out = &pool[s.off], *spans = out + W * H;
+  s.off = pool.add(W * H + H * 2);
+  if (s.off == ~0u) return LATER;
+  uint8_t *out = pool.at(s.off), *spans = out + W * H;
   for (int i = 0; i < W * H; i++) {
     int hits = int(core[i] * 16 + 0.5f);
     float g = glow[i] * 1.8f;
@@ -337,11 +369,10 @@ HOT void blit(const Placed *glyphs, int n, uint16_t color, uint32_t A, int clip0
   // Where it is not faded, each dot level's weight and each glow level's colour
   uint32_t weight[16], light[16];
   for (uint32_t v = 0; v < 16; v++) weight[v] = (DOT[v] * A + 1024) >> 11, light[v] = glowC[(glowOf(v) * A * G) >> 19];
-  const uint8_t *base = pool.data();
   for (int g = 0; g < n; g++) {
     const Placed &sp = glyphs[g];
     int gx = sp.x, ra = r0 - sp.y > 0 ? r0 - sp.y : 0, rb = r1 - sp.y < sp.h ? r1 - sp.y : sp.h;
-    const uint8_t *px = base + sp.off, *spans = px + sp.w * sp.h;
+    const uint8_t *px = pool.at(sp.off), *spans = px + sp.w * sp.h;
     for (int r = ra; r < rb; r++) {
       const uint8_t *row = px + r * sp.w;
       int c0 = spans[r * 2], c1 = spans[r * 2 + 1];
