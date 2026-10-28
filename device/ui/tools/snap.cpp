@@ -72,19 +72,16 @@ int main(int argc, char **argv) {
   static std::vector<uint8_t> cjk = load(argv[1]);
   if (!ui::init(cjk.data(), cjk.size())) return fprintf(stderr, "init failed\n"), 1;
   const char *out = argv[2];
-  // BANDS=n streams frames a band of n rows at a time, as the firmware does,
-  // each band copied into the frame as the panel would take it
-  static uint16_t bands[2][gfx::W * 120];
-  if (const char *rows = getenv("BANDS")) {
-    ui::Stream s = {{bands[0], bands[1]}, atoi(rows), nullptr, nullptr};
-    s.send = [](int, const uint16_t *band, int y0, int n) { memcpy(fb + y0 * gfx::W, band, size_t(n) * gfx::W * 2); };
-    s.wait = [](int) {};
-    ui::stream(s);
-  }
+  // BANDS=n draws frames a band of n rows at a time, as the firmware does
+  const char *bands = getenv("BANDS");
+  const int rows = bands && atoi(bands) > 0 ? atoi(bands) : gfx::H;
 
   int64_t ms = 1000;
   auto run = [&](double seconds) {
-    for (int64_t end = ms + int64_t(seconds * 1000); ms < end; ms += 33) ui::frame(fb, ms, BASE + ms);
+    for (int64_t end = ms + int64_t(seconds * 1000); ms < end; ms += 33) {
+      ui::frame(ms, BASE + ms);
+      for (int y = 0; y < gfx::H; y += rows) ui::draw(fb + y * gfx::W, y, y + rows < gfx::H ? y + rows : gfx::H);
+    }
   };
   auto now = [&] { return BASE + ms; };
 

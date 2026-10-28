@@ -28,7 +28,8 @@ EMSCRIPTEN_KEEPALIVE void am_touch(int kind, int x, int y, double ms) { ui::touc
 // Draws a frame and returns it as RGBA, with everything outside the round panel transparent
 EMSCRIPTEN_KEEPALIVE uint8_t *am_frame(double ms, double wall) {
   double t0 = emscripten_get_now();
-  ui::frame(fb, int64_t(ms), int64_t(wall));
+  ui::frame(int64_t(ms), int64_t(wall));
+  ui::draw(fb, 0, gfx::H);
   drawMs = emscripten_get_now() - t0;
   for (int y = 0; y < gfx::H; y++) {
     float dy = y + 0.5f - gfx::CY;

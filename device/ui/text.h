@@ -15,6 +15,11 @@ enum Face { PROP, LABEL, MONO };
 
 // cjk: the cjk10.bin bitmap font; may be null, and hanzi then draw as '?'
 bool init(const uint8_t *cjk, size_t len);
+// Called before a frame is recorded: lets go of the cached glyphs if they
+// have grown too many. Drawing only renders glyphs while recording, so the
+// cache holds still while bands are drawn; and only a few milliseconds' worth
+// a frame, a burst of new ones showing over the next frames instead.
+void newFrame();
 
 // Decodes the code point at s and moves s past it; 0 at the end
 uint32_t next(const char *&s);

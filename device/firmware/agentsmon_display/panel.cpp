@@ -1,13 +1,16 @@
 // The CO5300 protocol, as Arduino_GFX speaks it: a register write is opcode
 // 0x02 with the register in the middle byte of the 24-bit address, all on one
 // line; pixels follow a RAMWR as opcode 0x32, address 0x003C00, in QIO.
+//
+// Each band is three queued transactions, each its own CS frame: the rows'
+// window, RAMWR, then the pixels. Nothing waits for the bus to go idle, so
+// bands queue up behind each other while the cores draw.
 
 #include "panel.h"
 
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
-#include <esp_heap_caps.h>
 #include <string.h>
 
 namespace panel {
@@ -18,14 +21,19 @@ constexpr gpio_num_t PIN_CS = GPIO_NUM_12, PIN_RST = GPIO_NUM_1;
 constexpr int PIN_SCK = 38, PIN_D0 = 4, PIN_D1 = 5, PIN_D2 = 6, PIN_D3 = 7;
 constexpr int W = 466, H = 466;
 constexpr int X_OFFSET = 6;  // the panel's columns start at 6 of the controller's 480
-constexpr int CLOCK_HZ = 40 * 1000 * 1000;
-constexpr int MAX_TRANSFER = 32768;  // bytes; a band goes in one or two transfers
-constexpr int QUEUE = 2;
+constexpr int CLOCK_HZ = 80 * 1000 * 1000;
+constexpr int MAX_TRANSFER = 32768;  // bytes; a band goes in one transfer
+constexpr int QUEUE = 18;            // transactions in flight: six bands' worth
 
 spi_device_handle_t dev;
-spi_transaction_ext_t pending[QUEUE];
-int queued;
-int sending = -1;  // the band buffer on its way out, if any
+spi_transaction_t slots[QUEUE];
+int inFlight, nextSlot;
+volatile uint32_t bandsOut;
+
+// Runs as each transaction finishes; the pixels' are marked
+void IRAM_ATTR finished(spi_transaction_t *t) {
+  if (t->user) bandsOut = bandsOut + 1;
+}
 
 void reg(uint8_t r, const uint8_t *data = nullptr, int len = 0) {
   spi_transaction_t t = {};
@@ -36,9 +44,7 @@ void reg(uint8_t r, const uint8_t *data = nullptr, int len = 0) {
     memcpy(t.tx_data, data, len);
   }
   t.length = len * 8;
-  gpio_set_level(PIN_CS, 0);
   spi_device_polling_transmit(dev, &t);
-  gpio_set_level(PIN_CS, 1);
 }
 
 void reg8(uint8_t r, uint8_t v) { reg(r, &v, 1); }
@@ -48,11 +54,27 @@ void reg16x2(uint8_t r, uint16_t a, uint16_t b) {
   reg(r, d, 4);
 }
 
+// A free transaction, once the oldest has come back if all are out
+spi_transaction_t &slot() {
+  spi_transaction_t *done;
+  while (inFlight && spi_device_get_trans_result(dev, &done, 0) == ESP_OK) inFlight--;
+  if (inFlight == QUEUE) spi_device_get_trans_result(dev, &done, portMAX_DELAY), inFlight--;
+  spi_transaction_t &t = slots[nextSlot];
+  nextSlot = (nextSlot + 1) % QUEUE;
+  t = {};
+  return t;
+}
+
+bool queue(spi_transaction_t &t) {
+  // A transfer that was refused never comes back, so never wait for it
+  if (spi_device_queue_trans(dev, &t, portMAX_DELAY) != ESP_OK) return false;
+  inFlight++;
+  return true;
+}
+
 }  // namespace
 
 bool begin() {
-  gpio_set_direction(PIN_CS, GPIO_MODE_OUTPUT);
-  gpio_set_level(PIN_CS, 1);
   gpio_set_direction(PIN_RST, GPIO_MODE_OUTPUT);
   gpio_set_level(PIN_RST, 1);
   delay(10);
@@ -77,9 +99,10 @@ bool begin() {
   cfg.address_bits = 24;
   cfg.mode = 0;
   cfg.clock_speed_hz = CLOCK_HZ;
-  cfg.spics_io_num = -1;  // CS stays low across a frame's transfers, so it is ours
+  cfg.spics_io_num = PIN_CS;
   cfg.flags = SPI_DEVICE_HALFDUPLEX;
   cfg.queue_size = QUEUE;
+  cfg.post_cb = finished;
   if (spi_bus_add_device(SPI2_HOST, &cfg, &dev) != ESP_OK) return false;
 
   reg(0x11);  // sleep out
@@ -101,46 +124,32 @@ bool begin() {
 
 void brightness(uint8_t level) { reg8(0x51, level); }
 
-// Waits for the band on its way out, then lets the panel's CS go
-void finish() {
-  spi_transaction_t *done;
-  while (queued) spi_device_get_trans_result(dev, &done, portMAX_DELAY), queued--;
-  if (sending >= 0) gpio_set_level(PIN_CS, 1), sending = -1;
+void send(const uint16_t *band, int y0, int rows) {
+  // The rows' window
+  spi_transaction_t &window = slot();
+  window.cmd = 0x02;
+  window.addr = 0x2B << 8;  // RASET
+  window.flags = SPI_TRANS_USE_TXDATA;
+  int y1 = y0 + rows - 1;
+  window.tx_data[0] = uint8_t(y0 >> 8), window.tx_data[1] = uint8_t(y0);
+  window.tx_data[2] = uint8_t(y1 >> 8), window.tx_data[3] = uint8_t(y1);
+  window.length = 32;
+  queue(window);
+  spi_transaction_t &write = slot();
+  write.cmd = 0x02;
+  write.addr = 0x2C << 8;  // RAMWR
+  queue(write);
+  // The pixels, continuing the write
+  spi_transaction_t &pixels = slot();
+  pixels.flags = SPI_TRANS_MODE_QIO;
+  pixels.cmd = 0x32;
+  pixels.addr = 0x003C00;
+  pixels.tx_buffer = band;
+  pixels.length = size_t(rows) * W * 2 * 8;
+  pixels.user = (void *)1;
+  if (!queue(pixels)) bandsOut = bandsOut + 1;  // lost, but its buffer is free
 }
 
-void send(int k, const uint16_t *band, int y0, int rows) {
-  // The window is set by polled register writes, which need the bus idle
-  finish();
-  reg16x2(0x2B, y0, y0 + rows - 1);  // RASET
-  reg(0x2C);                          // RAMWR
-  const uint8_t *p = (const uint8_t *)band;
-  size_t left = size_t(rows) * W * 2;
-  gpio_set_level(PIN_CS, 0);
-  sending = k;
-  for (int n = 0; left && n < QUEUE; n++) {
-    spi_transaction_ext_t &x = pending[n];
-    x = {};
-    size_t len = left > MAX_TRANSFER ? MAX_TRANSFER : left;
-    if (n == 0) {
-      x.base.flags = SPI_TRANS_MODE_QIO;
-      x.base.cmd = 0x32;
-      x.base.addr = 0x003C00;
-    } else {
-      // Bare pixels continuing the same write
-      x.base.flags = SPI_TRANS_MODE_QIO | SPI_TRANS_VARIABLE_CMD | SPI_TRANS_VARIABLE_ADDR | SPI_TRANS_VARIABLE_DUMMY;
-    }
-    x.base.tx_buffer = p;
-    x.base.length = len * 8;
-    // A transfer that was refused never comes back, so never wait for it
-    if (spi_device_queue_trans(dev, &x.base, portMAX_DELAY) != ESP_OK) break;
-    queued++;
-    p += len;
-    left -= len;
-  }
-}
-
-void wait(int k) {
-  if (sending == k) finish();
-}
+uint32_t sent() { return bandsOut; }
 
 }  // namespace panel

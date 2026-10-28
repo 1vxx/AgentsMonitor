@@ -1,12 +1,8 @@
 #ifndef __clang__
-#pragma GCC optimize("O2")
+#pragma GCC optimize("O3")
 #endif
 
 #include "halo.h"
-
-#ifdef ESP_PLATFORM
-#include <esp_timer.h>
-#endif
 
 #include <string.h>
 
@@ -29,22 +25,37 @@ const RGB TEXT = hex(0xeceaf6);
 
 // The home orb's two outer shadows, as the box-shadows in live.css: a halo
 // all round and a warmer one below. So smooth that a value per 4x4 pixels,
-// dithered, does; small enough then for internal RAM.
+// dithered, does.
 constexpr int GQ = (gfx::W + 3) / 4;
 uint8_t *glowMap;
+int16_t glowSpan[GQ][2];  // each row's cells with any glow, [first, last)
+// The glow's colour by dither cell and strength, worked out when they change
+uint16_t glowLut[16 * 256];
 
 // The orb's colour field: a grid over the unit disc, finer for a bigger orb.
-// What does not move (the shading, the rim and bounce light, the highlight) is
-// worked out once per grid; the drifting blobs once per frame, however many
-// bands the frame is drawn in.
+// Each cell keeps how much of --m1, --m2, --m3 and white its colour is made
+// of, from the drifting blobs and the still shading (the inset shadow, the
+// rim and bounce light, the highlight). The blobs move them once a frame and
+// the palette colours them, so a change of colour costs no more than holding
+// still.
 constexpr int MAX_N = 96;
-uint16_t cells[MAX_N * MAX_N];
+uint16_t cells[MAX_N * MAX_N];  // in the panel's order: the inside goes straight down
+uint32_t *shares;               // per cell: m1, m2, m3 and white, 0..255 each, low byte first
+// The still shading of a cell, folded into how much of its blob colours it
+// keeps and the --m2 light added over them, out of 255 in 1/256 steps; and
+// its white. In integers: the ESP32's FPU stalls on every result it needs
+// next, and a cell is a long chain of them.
 struct Still {
-  uint8_t *lit, *light, *shine;  // 0..255 per cell; lit 0 marks a cell outside the disc
+  uint8_t *inside, *white;  // inside 0 marks a cell outside the disc
+  uint16_t *keep, *light;
 };
+// Smoothstep of t/256 in 1/32768 steps
+uint16_t smoothed[257];
 Still stills[3];
-uint32_t frameNo, cellsFrame = ~0u;
-int cellsN;
+uint32_t frameNo, sharesFrame = ~0u;
+float frameDt;
+int sharesN;
+int lastPal[3][3] = {{-1}};
 
 inline float smooth(float v) { return v * v * (3 - 2 * v); }
 inline float easeInOut(float t) { return 0.5f - 0.5f * cosf(t * gfx::TAU / 2); }
@@ -69,6 +80,8 @@ const Blob BLOBS[] = {
     {0.10f, -0.06f, 0.50f, {{-0.30f, 0.20f, 1.2f}, {0.20f, -0.24f, 0.85f}}, 1},
 };
 
+const Still &still(int N);
+
 }  // namespace
 
 Palette palette(model::Mood mood) { return PALETTES[int(mood)]; }
@@ -78,8 +91,9 @@ Palette mix(const Palette &a, const Palette &b, float t) {
 }
 
 bool init() {
-  glowMap = (uint8_t *)gfx::fastAlloc(GQ * GQ);
-  if (!glowMap) return false;
+  glowMap = (uint8_t *)gfx::bigAlloc(GQ * GQ);
+  shares = (uint32_t *)gfx::bigAlloc(MAX_N * MAX_N * 4);
+  if (!glowMap || !shares) return false;
   for (int y = 0; y < GQ; y++)
     for (int x = 0; x < GQ; x++) {
       float dx = 4 * x + 2 - OX, dy = 4 * y + 2 - OY;
@@ -89,24 +103,22 @@ bool init() {
       float a2 = 0.70f * 0.5f * (1 + erff((0.6f * ORB_R - d2) / (0.5f * ORB_R) / 1.41421356f));
       glowMap[y * GQ + x] = uint8_t((1 - (1 - a1) * (1 - a2)) * 255 + 0.5f);
     }
+  for (int y = 0; y < GQ; y++) {
+    int a = GQ, b = 0;
+    for (int x = 0; x < GQ; x++)
+      if (glowMap[y * GQ + x]) a = x < a ? x : a, b = x + 1;
+    glowSpan[y][0] = int16_t(a < b ? a : 0), glowSpan[y][1] = int16_t(b);
+  }
+  for (int t = 0; t <= 256; t++) smoothed[t] = uint16_t(smooth(t / 256.f) * 32768 + 0.5f);
+  // The shading for each size of grid, before the orb first changes size
+  for (int N = MAX_N; N >= MAX_N / 4; N /= 2)
+    if (!still(N).inside) return false;
   return true;
 }
 
-void background(RGB m1, float strength, float cover) {
-  static const uint8_t BAYER[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-  static uint16_t lut[16][256];
-  // Built once for a colour and strength, not once per band
-  static RGB lastColor = {-1, -1, -1};
-  static float lastStrength = -1;
-  bool same = m1.r == lastColor.r && m1.g == lastColor.g && m1.b == lastColor.b && strength == lastStrength;
-  lastColor = m1, lastStrength = strength;
-  for (int d = 0; d < 16 && !same; d++) {
-    float k = (BAYER[d] + 0.5f) / 16;
-    for (int a = 0; a < 256; a++) {
-      RGB c = gfx::scale(m1, a / 255.f * strength);
-      lut[d][a] = a && strength > 0 ? gfx::swap(gfx::c565({c.r + 8 * k, c.g + 4 * k, c.b + 8 * k})) : 0;
-    }
-  }
+namespace {
+
+HOT void drawBackground(bool dark, float cx, float cy, float cover) {
   // Pixel by pixel to a multiple of four, then four at a time: one glow value covers them all
   auto run = [](uint16_t *out, const uint16_t *l, const uint8_t *g, int x, int end) {
     for (; x < end && (x & 3); x++) out[x] = l[(x & 3) * 256 + g[x >> 2]];
@@ -120,27 +132,57 @@ void background(RGB m1, float strength, float cover) {
   };
   for (int y = gfx::clipY0; y < gfx::clipY1; y++) {
     uint16_t *out = gfx::fb + y * gfx::W;
-    float dy = y + 0.5f - gfx::CY, span = gfx::CX * gfx::CX - dy * dy;
-    int x0 = 0, x1 = 0;
-    if (span > 0) {
-      int half = int(sqrtf(span)) + 1;
-      x0 = int(gfx::CX) - half, x1 = int(gfx::CX) + half;
-      x0 = x0 < 0 ? 0 : x0, x1 = x1 > gfx::W ? gfx::W : x1;
-    }
-    // Outside the round: black, so a band sent straight to the panel holds nothing old
-    memset(out, 0, x0 * 2);
-    memset(out + x1, 0, (gfx::W - x1) * 2);
-    float hy = y + 0.5f - OY, hide = cover * cover - hy * hy;
-    int s0 = x1, s1 = x1;
+    int x0 = gfx::inside[y][0], x1 = gfx::inside[y][1];
+    if (x1 <= x0) x0 = x1 = 0;
+    // What the orb will cover is left as it is
+    float hy = y + 0.5f - cy, hide = cover * cover - hy * hy;
+    int s0 = gfx::W, s1 = gfx::W;
     if (hide > 0) {
       int h = int(sqrtf(hide));
-      s0 = int(OX) - h, s1 = int(OX) + h;
+      s0 = int(cx) - h, s1 = int(cx) + h;
+      s0 = s0 < 0 ? 0 : s0, s1 = s1 > gfx::W ? gfx::W : s1;
     }
-    const uint16_t *l = lut[0] + (y & 3) * 4 * 256;
+    // Black outside the round, so a band sent straight to the panel holds
+    // nothing old; and inside it too when there is no glow
+    if (dark) {
+      memset(out, 0, s0 * 2);
+      if (s1 < gfx::W) memset(out + s1, 0, (gfx::W - s1) * 2);
+      continue;
+    }
+    // Where the glow has died away it is black too
+    int g0 = glowSpan[y >> 2][0] * 4, g1 = glowSpan[y >> 2][1] * 4;
+    x0 = x0 > g0 ? x0 : g0, x1 = x1 < g1 ? x1 : g1;
+    if (x1 < x0) x1 = x0;
+    memset(out, 0, x0 * 2);
+    memset(out + x1, 0, (gfx::W - x1) * 2);
+    const uint16_t *l = glowLut + (y & 3) * 4 * 256;
     const uint8_t *g = glowMap + (y >> 2) * GQ;
     run(out, l, g, x0, s0 < x1 ? s0 : x1);
     run(out, l, g, s1 > x0 ? s1 : x0, x1);
   }
+}
+
+}  // namespace
+
+void background(RGB m1, float strength, float cx, float cy, float cover) {
+  static const uint8_t BAYER[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+  // Worked out again only for a change that can show: colours ease toward
+  // where they are going for ever, in ever smaller steps
+  static int last[4] = {-1};
+  int key[4] = {int(m1.r * 4), int(m1.g * 4), int(m1.b * 4), int(strength * 2048)};
+  if (memcmp(key, last, sizeof key)) {
+    memcpy(last, key, sizeof key);
+    for (int a = 0; a < 256; a++) {
+      RGB c = gfx::scale(m1, a / 255.f * strength);
+      for (int d = 0; d < 16; d++) {
+        float k = (BAYER[d] + 0.5f) / 16;
+        glowLut[d * 256 + a] = a && strength > 0 ? gfx::swap(gfx::c565({c.r + 8 * k, c.g + 4 * k, c.b + 8 * k})) : 0;
+      }
+    }
+  }
+  bool dark = strength <= 0;
+  if (gfx::recording) return gfx::keep(0, gfx::H, [=] { drawBackground(dark, cx, cy, cover); });
+  drawBackground(dark, cx, cy, cover);
 }
 
 namespace {
@@ -149,17 +191,19 @@ namespace {
 const Still &still(int N) {
   int k = N == MAX_N ? 0 : N == MAX_N / 2 ? 1 : 2;
   Still &s = stills[k];
-  if (s.lit) return s;
-  s.lit = (uint8_t *)gfx::bigAlloc(N * N * 3);
-  s.light = s.lit + N * N, s.shine = s.light + N * N;
+  if (s.inside) return s;
+  uint8_t *bytes = (uint8_t *)gfx::bigAlloc(N * N * 2);
+  uint16_t *words = (uint16_t *)gfx::bigAlloc(N * N * 4);
+  if (!bytes || !words) return s;
+  s.white = bytes + N * N;
+  s.keep = words, s.light = words + N * N;
+  s.inside = bytes;
   for (int gy = 0; gy < N; gy++)
     for (int gx = 0; gx < N; gx++) {
       int i = gy * N + gx;
       float u = (gx + 0.5f) / N * 2 - 1, v = (gy + 0.5f) / N * 2 - 1, rr = u * u + v * v;
-      if (rr > 1.1f) {
-        s.lit[i] = s.light[i] = s.shine[i] = 0;
-        continue;
-      }
+      s.inside[i] = rr <= 1.1f;
+      if (!s.inside[i]) continue;
       // The inset shadow that darkens the lower right
       float hx = u + 0.16f, hy = v + 0.2f;
       float lit = 1 - 0.18f * (1 - phi((1 - hx * hx - hy * hy) / 0.4f));
@@ -171,21 +215,37 @@ const Still &still(int N) {
       float sx = (u + 0.34f) / 0.5f, sy = (v + 0.44f) / 0.32f, s2 = sx * sx + sy * sy;
       float tx = (u + 0.40f) / 0.11f, ty = (v + 0.50f) / 0.08f, t2 = tx * tx + ty * ty;
       float shine = (s2 < 1 ? (1 - s2) * (1 - s2) * 0.42f : 0) + (t2 < 1 ? (1 - t2) * 0.55f : 0);
-      s.lit[i] = uint8_t(fmaxf(1, lit * 255 + 0.5f));
-      s.light[i] = uint8_t(gfx::clamp01(light) * 255 + 0.5f);
-      s.shine[i] = uint8_t(gfx::clamp01(shine) * 255 + 0.5f);
+      // As bytes first, as the shading has always been kept
+      lit = uint8_t(fmaxf(1, lit * 255 + 0.5f)) / 255.f;
+      light = uint8_t(gfx::clamp01(light) * 255 + 0.5f) / 255.f;
+      s.white[i] = uint8_t(gfx::clamp01(shine) * 255 + 0.5f);
+      shine = s.white[i] / 255.f;
+      s.keep[i] = uint16_t(lit * (1 - light) * (1 - shine) * 255 * 256 + 0.5f);
+      s.light[i] = uint16_t((light * (1 - shine) * 255 + 0.5f) * 256 + 0.5f);
     }
   return s;
 }
 
-// Works out the cells' colours; `parity` 0 or 1 does only the even or odd rows
-void colour(int N, const Palette &p, const Motion &m, int parity) {
-  struct Placed {
-    float x, y, r2, k;
-    RGB c;
-  } blobs[3];
-  const RGB *colors[3] = {&p.m1, &p.m2, &p.m3};
-  float cs = cosf(m.spin * gfx::TAU), sn = sinf(m.spin * gfx::TAU);
+// Where the blobs are this frame, and what the orb's grid needs done
+struct Placed {
+  float x, y, r2, k;
+  int color;
+};
+struct Grid {
+  int N, every, phase;  // the rows that move: those at `phase` of each `every`
+  bool recolour;  // a new palette, for every row
+  Placed blobs[3];
+  // A blob's reach into a cell, (r^2 - d^2) k + 1/2, falls apart into a part
+  // for the row and one for the column: the columns', worked out once, in
+  // 1/256 steps
+  int across[3][MAX_N];
+  int pal[3][3];
+};
+
+void placeBlobs(Grid &g, const Motion &m) {
+  Placed *blobs = g.blobs;
+  float sn, cs;
+  gfx::sincosTurns(m.spin, sn, cs);
   const float sigma = 0.15f;  // blur(0.075 * size)
   for (int b = 0; b < 3; b++) {
     const Blob &B = BLOBS[b];
@@ -202,55 +262,77 @@ void colour(int N, const Palette &p, const Motion &m, int parity) {
       k = B.k[0][2] + (B.k[1][2] - B.k[0][2]) * e;
     }
     float x = B.x + dx, y = B.y + dy, r = B.r * k;
-    blobs[b] = {x * cs - y * sn, x * sn + y * cs, r * r, 1 / (2 * r * sigma * 4.4f), *colors[B.color]};
+    blobs[b] = {x * cs - y * sn, x * sn + y * cs, r * r, 1 / (2 * r * sigma * 4.4f), B.color};
   }
-  RGB base = gfx::mix(p.m2, p.m1, 0.45f);
+  float step = 2.f / g.N;
+  for (int b = 0; b < 3; b++)
+    for (int gx = 0; gx < g.N; gx++) {
+      float du = (gx + 0.5f) * step - 1 - blobs[b].x;
+      g.across[b][gx] = int(du * du * blobs[b].k * 256 + 0.5f);
+    }
+}
+
+// Works out the shares of the moving rows in [gy0, gy1) from where the blobs are
+HOT void place(const Grid &g, int gy0, int gy1) {
+  const int N = g.N;
+  const Placed *blobs = g.blobs;
   const Still &st = still(N);
   float step = 2.f / N;
-  for (int gy = parity < 0 ? 0 : parity; gy < N; gy += parity < 0 ? 1 : 2) {
-    float v = (gy + 0.5f) * step - 1, u = 0.5f * step - 1;
-    for (int gx = 0; gx < N; gx++, u += step) {
+  for (int gy = gy0 + ((g.phase - gy0) % g.every + g.every) % g.every; gy < gy1; gy += g.every) {
+    float v = (gy + 0.5f) * step - 1;
+    int down[3];
+    for (int b = 0; b < 3; b++) {
+      float dv = v - blobs[b].y;
+      down[b] = gfx::ifloor(((blobs[b].r2 - dv * dv) * blobs[b].k + 0.5f) * 256 + 0.5f);
+    }
+    for (int gx = 0; gx < N; gx++) {
       int i = gy * N + gx;
-      if (!st.lit[i]) continue;
-      float r = base.r, g = base.g, b = base.b;
-      for (const Placed &B : blobs) {
-        float d2 = (u - B.x) * (u - B.x) + (v - B.y) * (v - B.y);
-        float t = (B.r2 - d2) * B.k + 0.5f;
+      if (!st.inside[i]) continue;
+      // The base, between --m2 and --m1, then each blob over it; shares out
+      // of 32768
+      int w0 = 14746, w1 = 18022, w2 = 0;
+      for (int b = 0; b < 3; b++) {
+        int t = down[b] - g.across[b][gx];
         if (t <= 0) continue;
-        float a = t >= 1 ? 1 : t * t * (3 - 2 * t);
-        r += (B.c.r - r) * a, g += (B.c.g - g) * a, b += (B.c.b - b) * a;
+        int a = t >= 256 ? 32768 : smoothed[t];
+        w0 -= w0 * a >> 15, w1 -= w1 * a >> 15, w2 -= w2 * a >> 15;
+        int c = blobs[b].color;
+        if (c == 0)
+          w0 += a;
+        else if (c == 1)
+          w1 += a;
+        else
+          w2 += a;
       }
-      float lit = st.lit[i] * (1 / 255.f), light = st.light[i] * (1 / 255.f), shine = st.shine[i] * (1 / 255.f);
-      r *= lit, g *= lit, b *= lit;
-      r += (p.m2.r - r) * light, g += (p.m2.g - g) * light, b += (p.m2.b - b) * light;
-      r += (255 - r) * shine, g += (255 - g) * shine, b += (255 - b) * shine;
-      cells[i] = gfx::swap(gfx::c565({r, g, b}));  // in the panel's order: the inside goes straight down
+      uint32_t keep = st.keep[i];
+      shares[i] = ((w0 * keep >> 15) + 128) >> 8 | ((w1 * keep >> 15) + st.light[i]) >> 8 << 8 |
+                  ((w2 * keep >> 15) + 128) >> 8 << 16 | uint32_t(st.white[i]) << 24;
     }
   }
 }
 
-}  // namespace
+// Colours the cells of rows [gy0, gy1) from their shares: the rows that
+// moved, or all of them for a new palette
+HOT void colour(const Grid &g, int gy0, int gy1) {
+  const int N = g.N;
+  const auto &pal = g.pal;
+  const Still &st = still(N);
+  int every = g.recolour ? 1 : g.every;
+  for (int gy = gy0 + ((g.phase - gy0) % every + every) % every; gy < gy1; gy += every)
+    for (int gx = 0; gx < N; gx++) {
+      int i = gy * N + gx;
+      if (!st.inside[i]) continue;
+      uint32_t s = shares[i], s1 = s & 255, s2 = s >> 8 & 255, s3 = s >> 16 & 255, sw = s >> 24;
+      int c[3];
+      for (int ch = 0; ch < 3; ch++) {
+        uint32_t v = (s1 * pal[0][ch] + s2 * pal[1][ch] + s3 * pal[2][ch] + sw * 255) * 257 >> 16;
+        c[ch] = v > 255 ? 255 : int(v);
+      }
+      cells[i] = gfx::swap(uint16_t((c[0] & 0xF8) << 8 | (c[1] & 0xFC) << 3 | c[2] >> 3));
+    }
+}
 
-uint32_t gridUs;
-
-void newFrame() { frameNo++; }
-
-void orb(float cx, float cy, float R, const Palette &p, const Motion &m, bool settled) {
-  int N = R >= 48 ? MAX_N : R >= 24 ? MAX_N / 2 : MAX_N / 4;
-  if (cellsFrame != frameNo || cellsN != N) {
-    // Settled, the blobs drift slowly enough that each frame can redo half the
-    // rows, the other half being a frame old
-    bool half = settled && cellsN == N && cellsFrame + 1 == frameNo;
-#ifdef ESP_PLATFORM
-    int64_t t0 = esp_timer_get_time();
-#endif
-    colour(N, p, m, half ? int(frameNo & 1) : -1);
-#ifdef ESP_PLATFORM
-    gridUs += uint32_t(esp_timer_get_time() - t0);
-#endif
-    cellsFrame = frameNo, cellsN = N;
-  }
-
+HOT void drawOrb(float cx, float cy, float R, int N) {
   // Inside the rim the cells go straight down, stepped across in 16.16 fixed
   // point; only the rim, antialiased with the faint white inset line of
   // .orb-body, is worked out per pixel
@@ -288,13 +370,84 @@ void orb(float cx, float cy, float R, const Palette &p, const Motion &m, bool se
         if (cov <= 0) continue;
         int gx = int((dx + R) * toCell);
         uint16_t c = gfx::swap(row[gx < 0 ? 0 : gx >= N ? N - 1 : gx]);
-        float rim = gfx::clamp01(1 - fabsf(d - (R - 1.2f)) / 1.4f);
+        float rim = gfx::clamp01(1 - fabsf(d - (R - 1.2f)) * (1 / 1.4f));
         if (rim > 0) c = gfx::c565(gfx::mix(rgb(c), white, 0.18f * rim));
         gfx::blend(y * gfx::W + x, c, uint32_t(cov * 32));
       }
     }
   }
 }
+
+}  // namespace
+
+uint32_t gridTicks;
+
+void newFrame(float dt) { frameNo++, frameDt = dt; }
+
+void orb(float cx, float cy, float R, const Palette &p, const Motion &m, bool settled) {
+  int N = R >= 48 ? MAX_N : R >= 24 ? MAX_N / 2 : MAX_N / 4;
+  if (sharesFrame != frameNo || sharesN != N) {
+    uint32_t t0 = gfx::ticks();
+    static Grid g;
+    g.N = N;
+    // Drifting slowly, the blobs move only some of the rows each frame, so
+    // that none is more than about 60 ms behind
+    bool share = settled && sharesN == N && sharesFrame + 1 == frameNo;
+    g.every = share ? frameDt > 0.03f ? 2 : frameDt > 0.015f ? 3 : 4 : 1;
+    g.phase = int(frameNo % uint32_t(g.every));
+    placeBlobs(g, m);
+    // A new colour reaches every cell; otherwise only the rows that moved
+    // need colouring again
+    const RGB *cs[3] = {&p.m1, &p.m2, &p.m3};
+    for (int k = 0; k < 3; k++) {
+      g.pal[k][0] = gfx::clamp8(cs[k]->r + 0.5f), g.pal[k][1] = gfx::clamp8(cs[k]->g + 0.5f), g.pal[k][2] = gfx::clamp8(cs[k]->b + 0.5f);
+    }
+    g.recolour = memcmp(g.pal, lastPal, sizeof g.pal) != 0;
+    memcpy(lastPal, g.pal, sizeof g.pal);
+    // The top half on one core, the bottom on the other
+    still(N);
+    gfx::split(
+        [](int half, void *arg) {
+          const Grid &g = *(const Grid *)arg;
+          int gy0 = half ? g.N / 2 : 0, gy1 = half ? g.N : g.N / 2;
+          place(g, gy0, gy1);
+          colour(g, gy0, gy1);
+        },
+        &g);
+    gridTicks += gfx::ticks() - t0;
+    sharesFrame = frameNo, sharesN = N;
+  }
+  if (gfx::recording) return gfx::keep(cy - R - 1, cy + R + 1, [=] { drawOrb(cx, cy, R, N); });
+  drawOrb(cx, cy, R, N);
+}
+
+namespace {
+
+// Where each star falls and how bright, once a frame: spread over four
+// pixels, so a star glides rather than steps
+struct Lit {
+  int x, y;
+  float w[4];  // weight for each of the four pixels, 0..32
+};
+Lit litStars[120];
+
+HOT void drawStars(float alpha) {
+  uint16_t c = gfx::c565(hex(0xd8deff));
+  for (const Lit &s : litStars) {
+    if (s.y + 1 < gfx::clipY0 || s.y >= gfx::clipY1 || s.x < 0 || s.y < 0 || s.x >= gfx::W - 1 || s.y >= gfx::H - 1) continue;
+    int i = s.y * gfx::W + s.x;
+    if (s.y >= gfx::clipY0) {
+      gfx::add(i, c, uint32_t(s.w[0] * alpha));
+      gfx::add(i + 1, c, uint32_t(s.w[1] * alpha));
+    }
+    if (s.y + 1 < gfx::clipY1) {
+      gfx::add(i + gfx::W, c, uint32_t(s.w[2] * alpha));
+      gfx::add(i + gfx::W + 1, c, uint32_t(s.w[3] * alpha));
+    }
+  }
+}
+
+}  // namespace
 
 void stars(float seconds, float alpha) {
   struct Star {
@@ -311,71 +464,34 @@ void stars(float seconds, float alpha) {
     for (Star &s : sky) s = {rnd(), 26 + 200 * sqrtf(rnd()), 0.1f + 0.5f * rnd() * rnd(), 0.06f + 0.22f * rnd(), rnd()};
     made = true;
   }
-  // Where each star is and how bright, worked out once a frame
-  // Where each star falls and how bright, once a frame: spread over four
-  // pixels, so a star glides rather than steps
-  struct Lit {
-    int x, y;
-    float w[4];  // weight for each of the four pixels, 0..32
-  };
-  static Lit lit[120];
-  static uint32_t litFrame = ~0u;
-  if (litFrame != frameNo) {
-    float turn = seconds / 1200;
-    for (int n = 0; n < 120; n++) {
-      const Star &s = sky[n];
-      float a = (s.a + turn) * gfx::TAU;
-      float x = gfx::CX + sinf(a) * s.r - 0.5f, y = gfx::CY - cosf(a) * s.r - 0.5f;
-      float k = s.bright * (0.55f + 0.45f * sinf((seconds * s.rate + s.phase) * gfx::TAU)) * 32;
-      int x0 = gfx::ifloor(x), y0 = gfx::ifloor(y);
-      float fx = x - x0, fy = y - y0;
-      lit[n] = {x0, y0, {k * (1 - fx) * (1 - fy), k * fx * (1 - fy), k * (1 - fx) * fy, k * fx * fy}};
-    }
-    litFrame = frameNo;
+  float turn = seconds / 1200;
+  for (int n = 0; n < 120; n++) {
+    const Star &s = sky[n];
+    float sn, cs, tw, unused;
+    gfx::sincosTurns(s.a + turn, sn, cs);
+    gfx::sincosTurns(seconds * s.rate + s.phase, tw, unused);
+    float x = gfx::CX + sn * s.r - 0.5f, y = gfx::CY - cs * s.r - 0.5f;
+    float k = s.bright * (0.55f + 0.45f * tw) * 32;
+    int x0 = gfx::ifloor(x), y0 = gfx::ifloor(y);
+    float fx = x - x0, fy = y - y0;
+    litStars[n] = {x0, y0, {k * (1 - fx) * (1 - fy), k * fx * (1 - fy), k * (1 - fx) * fy, k * fx * fy}};
   }
-  uint16_t c = gfx::c565(hex(0xd8deff));
-  for (const Lit &s : lit) {
-    if (s.y + 1 < gfx::clipY0 || s.y >= gfx::clipY1 || s.x < 0 || s.y < 0 || s.x >= gfx::W - 1 || s.y >= gfx::H - 1) continue;
-    int i = s.y * gfx::W + s.x;
-    if (s.y >= gfx::clipY0) {
-      gfx::add(i, c, uint32_t(s.w[0] * alpha));
-      gfx::add(i + 1, c, uint32_t(s.w[1] * alpha));
-    }
-    if (s.y + 1 < gfx::clipY1) {
-      gfx::add(i + gfx::W, c, uint32_t(s.w[2] * alpha));
-      gfx::add(i + gfx::W + 1, c, uint32_t(s.w[3] * alpha));
-    }
-  }
+  if (gfx::recording) return gfx::keep(0, gfx::H, [=] { drawStars(alpha); });
+  drawStars(alpha);
 }
 
-void scale(float turn, RGB majorColor, float alpha, float sweep) {
-  // Each tick's direction and how much the sweep lights it, once a frame
-  static const float LEN[3] = {4.5f, 7.5f, 13}, HALF[3] = {0.65f, 0.65f, 0.95f};
-  struct Tick {
-    float dx, dy, lit;
-    int16_t x0, x1, y0, y1;  // the pixels it can touch
-    uint8_t kind;            // 0 every 3 degrees, 1 every 15, 2 every 30
-  };
-  static Tick ticks[120];
-  static uint32_t madeFor = ~0u;
-  if (madeFor != frameNo) {
-    for (int n = 0; n < 120; n++) {
-      Tick &t = ticks[n];
-      float u = turn + n / 120.f, a = u * gfx::TAU;
-      float d = u - sweep;
-      d -= float(gfx::ifloor(d + 0.5f));
-      d /= 0.035f;
-      t.kind = uint8_t(n % 10 == 0 ? 2 : n % 5 == 0 ? 1 : 0);
-      t.dx = sinf(a), t.dy = -cosf(a), t.lit = 1 + 1.48f * expf(-d * d);
-      float len = LEN[t.kind], half = HALF[t.kind];
-      float ax = gfx::CX + t.dx * R_TICK, ay = gfx::CY + t.dy * R_TICK, bx = ax + t.dx * len, by = ay + t.dy * len;
-      t.x0 = int16_t(gfx::ifloor((ax < bx ? ax : bx) - half - 1)), t.x1 = int16_t(gfx::iceil((ax > bx ? ax : bx) + half + 1));
-      t.y0 = int16_t(gfx::ifloor((ay < by ? ay : by) - half - 1)), t.y1 = int16_t(gfx::iceil((ay > by ? ay : by) + half + 1));
-    }
-    madeFor = frameNo;
-  }
-  uint16_t major = gfx::c565(majorColor), minor = gfx::c565(TEXT);
-  float A = gfx::clamp01(alpha);
+namespace {
+
+// Each tick's direction and how much the sweep lights it, once a frame
+const float LEN[3] = {4.5f, 7.5f, 13}, HALF[3] = {0.65f, 0.65f, 0.95f};
+struct Tick {
+  float dx, dy, lit;
+  int16_t x0, x1, y0, y1;  // the pixels it can touch
+  uint8_t kind;            // 0 every 3 degrees, 1 every 15, 2 every 30
+};
+Tick ticks[120];
+
+HOT void drawScale(uint16_t major, uint16_t minor, float A) {
   for (const Tick &t : ticks) {
     if (t.y1 <= gfx::clipY0 || t.y0 >= gfx::clipY1) continue;
     float len = LEN[t.kind], half = HALF[t.kind];
@@ -394,6 +510,30 @@ void scale(float turn, RGB majorColor, float alpha, float sweep) {
       }
     }
   }
+}
+
+}  // namespace
+
+void scale(float turn, RGB majorColor, float alpha, float sweep) {
+  for (int n = 0; n < 120; n++) {
+    Tick &t = ticks[n];
+    float u = turn + n / 120.f, sn, cs;
+    float d = u - sweep;
+    d -= float(gfx::ifloor(d + 0.5f));
+    d *= 1 / 0.035f;
+    t.kind = uint8_t(n % 10 == 0 ? 2 : n % 5 == 0 ? 1 : 0);
+    gfx::sincosTurns(u, sn, cs);
+    // Far from the sweep the light is 1 to the last bit
+    t.dx = sn, t.dy = -cs, t.lit = d * d > 20 ? 1 : 1 + 1.48f * expf(-d * d);
+    float len = LEN[t.kind], half = HALF[t.kind];
+    float ax = gfx::CX + t.dx * R_TICK, ay = gfx::CY + t.dy * R_TICK, bx = ax + t.dx * len, by = ay + t.dy * len;
+    t.x0 = int16_t(gfx::ifloor((ax < bx ? ax : bx) - half - 1)), t.x1 = int16_t(gfx::iceil((ax > bx ? ax : bx) + half + 1));
+    t.y0 = int16_t(gfx::ifloor((ay < by ? ay : by) - half - 1)), t.y1 = int16_t(gfx::iceil((ay > by ? ay : by) + half + 1));
+  }
+  uint16_t major = gfx::c565(majorColor), minor = gfx::c565(TEXT);
+  float A = gfx::clamp01(alpha);
+  if (gfx::recording) return gfx::keep(gfx::CY - R_TICK - 16, gfx::CY + R_TICK + 16, [=] { drawScale(major, minor, A); });
+  drawScale(major, minor, A);
 }
 
 void tail(float r, float head, float span, uint16_t c, float alpha) {
