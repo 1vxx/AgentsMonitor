@@ -15,6 +15,12 @@ namespace gfx {
 
 uint16_t *fb;
 uint32_t *pol;
+int clipY0 = 0, clipY1 = H;
+
+void clip(int y0, int y1) {
+  clipY0 = y0 < 0 ? 0 : y0;
+  clipY1 = y1 > H ? H : y1;
+}
 
 void *bigAlloc(size_t n) {
 #ifdef ESP_PLATFORM
@@ -89,7 +95,7 @@ void arc(float r, float w, float from, float to, uint16_t c, float a0, float a1)
   uint32_t start = angle16(from), len = uint32_t(span * 65536);
   int R16 = int(r * 16 + 0.5f), H16 = int((w / 2 + 0.5f) * 16 + 0.5f);
   int A0 = int(a0 * 32 * 256), dA = int((a1 - a0) * 32 * 256);
-  annulus(r - w / 2 - 1, r + w / 2 + 1, [&](int i) {
+  auto pixel = [&](int i) {
     uint32_t p = pol[i];
     uint32_t along = ((p >> 16) - start) & 0xFFFF;
     if (along >= len) return;
@@ -99,14 +105,50 @@ void arc(float r, float w, float from, float to, uint16_t c, float a0, float a1)
     int a = A0 + int(int64_t(dA) * along / len);  // alpha in 1/256 steps of 0..32
     if (a <= 0) return;
     blend(i, c, uint32_t(cov * a) >> 12);
-  });
+  };
+  float ri = r - w / 2 - 1, ro = r + w / 2 + 1;
+  if (span > 0.45f) {
+    annulus(ri, ro, pixel);
+    return;
+  }
+  // A short arc: only the box round it, from its two ends and any point due
+  // up, down, left or right of the centre that it passes
+  float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+  auto take = [&](float turn, float rad) {
+    float a = turn * TAU, x = CX + sinf(a) * rad, y = CY - cosf(a) * rad;
+    x0 = x < x0 ? x : x0, x1 = x > x1 ? x : x1, y0 = y < y0 ? y : y0, y1 = y > y1 ? y : y1;
+  };
+  take(from, ri), take(from, ro), take(from + span, ri), take(from + span, ro);
+  for (int q = 0; q < 4; q++) {
+    float d = q * 0.25f - from;
+    d -= float(ifloor(d));
+    if (d < span) take(q * 0.25f, ro);
+  }
+  int px0 = ifloor(x0) < 0 ? 0 : ifloor(x0), px1 = iceil(x1) > W - 1 ? W - 1 : iceil(x1);
+  int py0 = ifloor(y0) < clipY0 ? clipY0 : ifloor(y0), py1 = iceil(y1) > clipY1 - 1 ? clipY1 - 1 : iceil(y1);
+  for (int y = py0; y <= py1; y++)
+    for (int x = px0; x <= px1; x++) pixel(y * W + x);
 }
 
 void ringAt(float x, float y, float r, float w, uint16_t c, float alpha) {
-  around(x, y, r + w / 2 + 1, [&](int i, float d2) {
-    float cov = clamp01(w / 2 + 0.5f - fabsf(sqrtf(d2) - r));
-    if (cov > 0) blend(i, c, uint32_t(cov * alpha * 32));
-  });
+  // Row by row, only the band between the ring's inner and outer edges
+  float ro = r + w / 2 + 1, ri = r - w / 2 - 1;
+  int y0 = ifloor(y - ro), y1 = iceil(y + ro);
+  if (y0 < clipY0) y0 = clipY0;
+  if (y1 > clipY1 - 1) y1 = clipY1 - 1;
+  for (int py = y0; py <= y1; py++) {
+    float dy = py + 0.5f - y, o2 = ro * ro - dy * dy;
+    if (o2 <= 0) continue;
+    float xo = sqrtf(o2), i2 = ri * ri - dy * dy, xi = ri > 0 && i2 > 0 ? sqrtf(i2) : 0;
+    int spans[2][2] = {{ifloor(x - xo - 1), iceil(x - xi)}, {ifloor(x + xi - 1), iceil(x + xo)}};
+    if (spans[0][1] >= spans[1][0]) spans[0][1] = spans[1][1], spans[1][0] = spans[1][1] + 1;
+    for (auto &span : spans)
+      for (int px = span[0] < 0 ? 0 : span[0]; px <= span[1] && px < W; px++) {
+        float dx = px + 0.5f - x;
+        float cov = clamp01(w / 2 + 0.5f - fabsf(sqrtf(dx * dx + dy * dy) - r));
+        if (cov > 0) blend(py * W + px, c, uint32_t(cov * alpha * 32));
+      }
+  }
 }
 
 void discAt(float x, float y, float r, uint16_t c, float alpha) {
@@ -121,10 +163,25 @@ void discAt(float x, float y, float r, uint16_t c, float alpha) {
 }
 
 void glowAt(float x, float y, float r, uint16_t c, float alpha) {
-  float inv = 1 / (r * r);
-  around(x, y, r, [&](int i, float d2) {
-    float k = 1 - d2 * inv;
-    add(i, c, uint32_t(alpha * k * k * k * 32));
+  // The falloff (1 - d^2/r^2)^3 by squared distance, and how far it is still
+  // worth drawing: past where it adds less than one step
+  static float lastAlpha = -1;
+  static uint8_t fall[257];
+  if (alpha != lastAlpha) {
+    for (int k = 0; k <= 256; k++) {
+      float v = 1 - k / 256.f;
+      fall[k] = uint8_t(clamp01(alpha) * v * v * v * 32 + 0.5f);
+    }
+    lastAlpha = alpha;
+  }
+  int reach = 256;
+  while (reach > 0 && !fall[reach - 1]) reach--;
+  if (!reach) return;
+  float scale = 256 / (r * r);
+  float rr = r * sqrtf(reach / 256.f);
+  around(x, y, rr, [&](int i, float d2) {
+    int k = int(d2 * scale);
+    if (k < reach) add(i, c, fall[k]);
   });
 }
 
@@ -142,21 +199,23 @@ void vignette(float r0, float r1, uint16_t c, float alpha) {
 }
 
 void roundRect(float x0, float y0, float x1, float y1, float radius, uint16_t c, float alpha) {
-  int px0 = int(floorf(x0)), px1 = int(ceilf(x1)), py0 = int(floorf(y0)), py1 = int(ceilf(y1));
+  int px0 = ifloor(x0), px1 = iceil(x1), py0 = ifloor(y0), py1 = iceil(y1);
   if (px0 < 0) px0 = 0;
-  if (py0 < 0) py0 = 0;
+  if (py0 < clipY0) py0 = clipY0;
   if (px1 > W) px1 = W;
-  if (py1 > H) py1 = H;
+  if (py1 > clipY1) py1 = clipY1;
   for (int y = py0; y < py1; y++) {
     float cy = y + 0.5f, dy = cy < y0 + radius ? y0 + radius - cy : cy > y1 - radius ? cy - (y1 - radius) : 0;
-    float vy = clamp01(fminf(cy - y0 + 0.5f, y1 - cy + 0.5f));
+    float top = cy - y0 + 0.5f, bottom = y1 - cy + 0.5f, vy = clamp01(top < bottom ? top : bottom);
     for (int x = px0; x < px1; x++) {
       float cx = x + 0.5f, dx = cx < x0 + radius ? x0 + radius - cx : cx > x1 - radius ? cx - (x1 - radius) : 0;
       float cov;
-      if (dx > 0 && dy > 0)
+      if (dx > 0 && dy > 0) {
         cov = clamp01(radius + 0.5f - sqrtf(dx * dx + dy * dy));
-      else
-        cov = fminf(vy, clamp01(fminf(cx - x0 + 0.5f, x1 - cx + 0.5f)));
+      } else {
+        float left = cx - x0 + 0.5f, right = x1 - cx + 0.5f, vx = clamp01(left < right ? left : right);
+        cov = vy < vx ? vy : vx;
+      }
       if (cov > 0) blend(y * W + x, c, uint32_t(cov * alpha * 32));
     }
   }

@@ -28,6 +28,16 @@ inline uint16_t c565(RGB c) {
 }
 inline uint16_t swap(uint16_t v) { return __builtin_bswap16(v); }
 inline float clamp01(float v) { return v <= 0 ? 0 : v >= 1 ? 1 : v; }
+// floor and ceil without a call into libm, which on the ESP32 costs more than
+// the arithmetic around it
+inline int ifloor(float v) {
+  int i = int(v);
+  return i - (v < float(i));
+}
+inline int iceil(float v) {
+  int i = int(v);
+  return i + (v > float(i));
+}
 
 // Large tables go to PSRAM on the device; small hot ones to internal RAM
 void *bigAlloc(size_t n);
@@ -36,13 +46,17 @@ void *fastAlloc(size_t n);
 bool init();
 // Where the next drawing goes
 void target(uint16_t *frame);
+// Keeps all drawing to rows [y0, y1): a frame drawn a band at a time draws
+// each band with the band's rows as its clip
+void clip(int y0, int y1);
 
 extern uint16_t *fb;
 extern uint32_t *pol;  // per pixel: distance from the centre in 1/16 px, and angle << 16
+extern int clipY0, clipY1;
 
 inline int dist16(uint32_t p) { return int(p & 0xFFFF); }
 // Turns (any number) to the table's angle: 65536 to the turn, clockwise from 12 o'clock
-inline uint32_t angle16(float turns) { return uint32_t(int32_t(floorf((turns - floorf(turns)) * 65536))) & 0xFFFF; }
+inline uint32_t angle16(float turns) { return uint32_t(ifloor((turns - float(ifloor(turns))) * 65536)) & 0xFFFF; }
 
 // RGB565 with green, red and blue spread apart so one multiply scales all three
 inline uint32_t spread(uint32_t c) { return (c | c << 16) & 0x07E0F81F; }
@@ -58,27 +72,36 @@ inline void blend(int i, uint16_t c, uint32_t a) {
   fb[i] = swap(uint16_t(r | r >> 16));
 }
 
+// Adds spread colours, each channel saturating: a channel that overflows
+// sets the bit just above it, and that bit fills the channel back to its top
+inline uint32_t addSpread(uint32_t p, uint32_t c) {
+  uint32_t s = p + c, o = s & 0x08010020;
+  uint32_t fill = ((o & 0x20) - ((o & 0x20) >> 5)) | ((o & 0x10000) - ((o & 0x10000) >> 5)) |
+                  ((o & 0x8000000) - ((o & 0x8000000) >> 6));
+  return (s | fill) & 0x07E0F81F;
+}
+
 // Adds colour c at strength a in 0..32, saturating
 inline void add(int i, uint16_t c, uint32_t a) {
-  uint32_t p = swap(fb[i]);
-  uint32_t r = (p >> 11) + ((c >> 11) * a >> 5), g = (p >> 5 & 63) + ((c >> 5 & 63) * a >> 5), b = (p & 31) + ((c & 31) * a >> 5);
-  fb[i] = swap(uint16_t((r > 31 ? 31 : r) << 11 | (g > 63 ? 63 : g) << 5 | (b > 31 ? 31 : b)));
+  if (!a) return;
+  uint32_t r = addSpread(spread(swap(fb[i])), spread(c) * (a > 32 ? 32 : a) >> 5 & 0x07E0F81F);
+  fb[i] = swap(uint16_t(r | r >> 16));
 }
 
 // Calls f(index) for every pixel between radii r0 and r1 of the centre
 template <typename F>
 void annulus(float r0, float r1, F f) {
   if (r0 < 0) r0 = 0;
-  int y0 = int(floorf(CY - r1)), y1 = int(ceilf(CY + r1));
-  if (y0 < 0) y0 = 0;
-  if (y1 > H - 1) y1 = H - 1;
+  int y0 = ifloor(CY - r1), y1 = iceil(CY + r1);
+  if (y0 < clipY0) y0 = clipY0;
+  if (y1 > clipY1 - 1) y1 = clipY1 - 1;
   for (int y = y0; y <= y1; y++) {
     float dy = y + 0.5f - CY;
     float o2 = r1 * r1 - dy * dy;
     if (o2 <= 0) continue;
     float xo = sqrtf(o2), i2 = r0 * r0 - dy * dy, xi = i2 > 0 ? sqrtf(i2) : 0;
-    int a0 = int(floorf(CX - xo - 1)), a1 = int(ceilf(CX - xi));
-    int b0 = int(floorf(CX + xi - 1)), b1 = int(ceilf(CX + xo));
+    int a0 = ifloor(CX - xo - 1), a1 = iceil(CX - xi);
+    int b0 = ifloor(CX + xi - 1), b1 = iceil(CX + xo);
     if (a0 < 0) a0 = 0;
     if (b1 > W - 1) b1 = W - 1;
     if (a1 >= b0) a1 = b1, b0 = b1 + 1;
@@ -91,11 +114,11 @@ void annulus(float r0, float r1, F f) {
 // Calls f(index, squared distance) for every pixel within r of (x, y)
 template <typename F>
 void around(float x, float y, float r, F f) {
-  int x0 = int(floorf(x - r)), x1 = int(ceilf(x + r)), y0 = int(floorf(y - r)), y1 = int(ceilf(y + r));
+  int x0 = ifloor(x - r), x1 = iceil(x + r), y0 = ifloor(y - r), y1 = iceil(y + r);
   if (x0 < 0) x0 = 0;
-  if (y0 < 0) y0 = 0;
+  if (y0 < clipY0) y0 = clipY0;
   if (x1 > W - 1) x1 = W - 1;
-  if (y1 > H - 1) y1 = H - 1;
+  if (y1 > clipY1 - 1) y1 = clipY1 - 1;
   float r2 = r * r;
   for (int py = y0; py <= y1; py++) {
     float dy = py + 0.5f - y;
@@ -109,8 +132,8 @@ void around(float x, float y, float r, F f) {
 // Calls f(row start index, x0, x1) for each row of the round panel between y0 and y1
 template <typename F>
 void rows(int y0, int y1, F f) {
-  if (y0 < 0) y0 = 0;
-  if (y1 > H) y1 = H;
+  if (y0 < clipY0) y0 = clipY0;
+  if (y1 > clipY1) y1 = clipY1;
   for (int y = y0; y < y1; y++) {
     float dy = y + 0.5f - CY, span = CX * CX - dy * dy;
     if (span <= 0) continue;

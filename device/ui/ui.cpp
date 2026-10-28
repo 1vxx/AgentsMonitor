@@ -23,6 +23,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ESP_PLATFORM
+#include <esp_timer.h>
+#else
+#include <chrono>
+#endif
+
 #include "gfx.h"
 #include "halo.h"
 #include "model.h"
@@ -69,6 +75,23 @@ constexpr float MOVE_PX = 220;              // a finger this far carries a move 
 constexpr float SLIDE = 320;                // how far apart neighbouring titles sit when swiped
 
 // ---------- State ----------
+
+// Time spent in each stage of drawing, for the logs
+enum Part { P_BACK, P_SKY, P_RIM, P_ORB, P_TEXT, P_PRESS, P_WAIT, PARTS };
+const char *const PART_NAMES[PARTS] = {"back", "sky", "rim", "orb", "text", "press", "wait"};
+uint32_t partUs[PARTS], partFrames;
+
+// Where frames go a band at a time, if they do (see stream())
+Stream out;
+
+int64_t clockUs() {
+#ifdef ESP_PLATFORM
+  return esp_timer_get_time();
+#else
+  using namespace std::chrono;
+  return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
+#endif
+}
 
 model::Summary cur;
 bool haveSummary;
@@ -1008,18 +1031,35 @@ void compose() {
   }
 
   // Back to front: the sky and the home glow, each screen's backdrop, the orb, then text
+  int64_t t0 = clockUs();
+  auto lap = [&](Part part) {
+    int64_t t1 = clockUs();
+    partUs[part] += uint32_t(t1 - t0);
+    t0 = t1;
+  };
   bool still = from == to && to == HOME;
   halo::background(p.m1, glowK * home, still ? R - 4 - fabsf(shake) : 0);
+  lap(P_BACK);
   halo::stars(nowMs / 1000.f, 0.9f);
+  lap(P_SKY);
   if (home > 0.01f) homeBack(p, ox, oy, R, shown(HOME), cheering ? c : -1, wincing ? f : -1);
   if (present(ALERT) > 0.01f) alertBack(shown(ALERT));
+  lap(P_RIM);
   if (home < 0.99f) gfx::glowAt(ox, oy, R * 2.6f, gfx::c565(p.m1), 0.5f * (1 - home));
-  halo::orb(ox, oy, R, p, motion);
+  // Half the orb's rows a frame only while its colours hold still; changing
+  // fast, a frame-old half would show as stripes
+  const halo::Palette &want = halo::palette(mood());
+  bool steady = fabsf(pal.m1.r - want.m1.r) + fabsf(pal.m1.g - want.m1.g) + fabsf(pal.m1.b - want.m1.b) < 3;
+  halo::orb(ox, oy, R, p, motion, from == to && steady && !cheering && !wincing && detail == 0);
+  lap(P_ORB);
   if (home > 0.01f) homeText(shown(HOME), arrived(HOME));
   if (present(ALERT) > 0.01f) alertText(shown(ALERT), arrived(ALERT));
   if (present(LIST) > 0.01f) listLayer(shown(LIST), arrived(LIST));
   if (present(DETAIL) > 0.01f) detailLayer(shown(DETAIL), arrived(DETAIL));
+  lap(P_TEXT);
   drawPress();
+  lap(P_PRESS);
+  if (gfx::clipY0 == 0) partFrames++;
 }
 
 // ---------- Touch ----------
@@ -1217,9 +1257,27 @@ void frame(uint16_t *fb, int64_t ms, int64_t wall) {
   lastMs = ms;
   wallMs = wall ? wall : summaryTs + (ms - summaryAt);
   step(dt);
-  gfx::target(fb);
-  compose();
+  halo::newFrame();
+  if (!out.rows) {
+    gfx::target(fb);
+    compose();
+    return;
+  }
+  for (int b = 0, y0 = 0; y0 < gfx::H; b++, y0 += out.rows) {
+    int k = b & 1, y1 = y0 + out.rows < gfx::H ? y0 + out.rows : gfx::H;
+    int64_t t0 = clockUs();
+    out.wait(k);
+    partUs[P_WAIT] += uint32_t(clockUs() - t0);
+    // Indexes into the frame land in the band: its first row stands for row y0
+    gfx::target(out.buf[k] - y0 * gfx::W);
+    gfx::clip(y0, y1);
+    compose();
+    out.send(k, out.buf[k], y0, y1 - y0);
+  }
+  gfx::clip(0, gfx::H);
 }
+
+void stream(const Stream &s) { out = s; }
 
 int cue() {
   if (cueHead == cueTail) return -1;
@@ -1231,6 +1289,18 @@ int cue() {
 const char *screen() {
   static const char *const NAMES[] = {"home", "alert", "list", "detail"};
   return NAMES[to];
+}
+
+void timings(char *out, size_t len) {
+  size_t n = 0;
+  out[0] = 0;
+  n += snprintf(out, len, "grid %.1f ", partFrames ? halo::gridUs / 1000.f / partFrames : 0.f);
+  halo::gridUs = 0;
+  for (int p = 0; p < PARTS && n < len; p++) {
+    n += snprintf(out + n, len - n, "%s %.1f ", PART_NAMES[p], partFrames ? partUs[p] / 1000.f / partFrames : 0.f);
+    partUs[p] = 0;
+  }
+  partFrames = 0;
 }
 
 }  // namespace ui

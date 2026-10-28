@@ -35,7 +35,13 @@ void background(gfx::RGB m1, float strength, float cover);
 void stars(float seconds, float alpha);
 // The orb as a glass sphere: the blobs inside, a soft highlight up and to the
 // left, a lit rim and a little light bounced up from below
-void orb(float cx, float cy, float R, const Palette &p, const Motion &m);
+// `settled`: the orb is not moving between screens, so half its colours may
+// be a frame old
+void orb(float cx, float cy, float R, const Palette &p, const Motion &m, bool settled = false);
+// Marks a new frame: the orb works out its colours again on its next draw
+void newFrame();
+// Microseconds spent working out the orb's colours, summed, for the logs
+extern uint32_t gridUs;
 // 120 ticks, longer every 15 and 30 degrees, turned by `turn`, brighter where
 // a slow light at `sweep` turns passes over them
 void scale(float turn, gfx::RGB major, float alpha, float sweep);

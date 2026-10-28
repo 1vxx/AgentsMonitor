@@ -72,6 +72,15 @@ int main(int argc, char **argv) {
   static std::vector<uint8_t> cjk = load(argv[1]);
   if (!ui::init(cjk.data(), cjk.size())) return fprintf(stderr, "init failed\n"), 1;
   const char *out = argv[2];
+  // BANDS=n streams frames a band of n rows at a time, as the firmware does,
+  // each band copied into the frame as the panel would take it
+  static uint16_t bands[2][gfx::W * 120];
+  if (const char *rows = getenv("BANDS")) {
+    ui::Stream s = {{bands[0], bands[1]}, atoi(rows), nullptr, nullptr};
+    s.send = [](int, const uint16_t *band, int y0, int n) { memcpy(fb + y0 * gfx::W, band, size_t(n) * gfx::W * 2); };
+    s.wait = [](int) {};
+    ui::stream(s);
+  }
 
   int64_t ms = 1000;
   auto run = [&](double seconds) {

@@ -139,7 +139,10 @@ const uint8_t *cjkCodes, *cjkOffsets, *cjkData;
 
 inline uint32_t u32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | uint32_t(p[3]) << 24; }
 
+const Latin *ascii[128];  // ASCII straight to its glyph
+
 const Latin *findLatin(uint32_t cp) {
+  if (cp < 128) return ascii[cp];
   for (const Latin &g : latin)
     if (g.cp == cp) return &g;
   return nullptr;
@@ -174,7 +177,8 @@ int advance(Face f, uint32_t cp) {
 // and how much glow reaches it. Placed relative to the pen and the baseline.
 struct Sprite {
   int16_t x0, y0, w, h;
-  uint32_t off;  // into pool: w * h pairs of (dot, glow), 0..255
+  uint32_t off;  // into pool: w * h pairs of (dot, glow), 0..255, then each
+                 // row's first and last lit column
 };
 std::unordered_map<uint32_t, Sprite> sprites;
 std::vector<uint8_t> pool;
@@ -221,7 +225,7 @@ const Sprite &sprite(Face f, int scale, uint32_t cp) {
     y0 = at[k][1] < y0 ? at[k][1] : y0, y1 = at[k][1] > y1 ? at[k][1] : y1;
   }
   float sigma = 0.85f * scale;
-  int pad = int(ceilf(sigma * 3)) + 1;
+  int pad = int(ceilf(sigma * 2.5f)) + 1;
   s.x0 = int16_t(x0 * scale - pad), s.y0 = int16_t(y0 * scale - pad);
   s.w = int16_t((x1 - x0 + 1) * scale + 2 * pad), s.h = int16_t((y1 - y0 + 1) * scale + 2 * pad);
   int W = s.w, H = s.h;
@@ -264,12 +268,21 @@ const Sprite &sprite(Face f, int scale, uint32_t cp) {
         if (y + k >= 0 && y + k < H) a += tmp[(y + k) * W + x] * kernel[k + R];
       glow[y * W + x] = a;
     }
-  pool.resize(pool.size() + W * H * 2);
-  uint8_t *out = &pool[s.off];
+  pool.resize(pool.size() + W * H * 2 + H * 2);
+  uint8_t *out = &pool[s.off], *spans = out + W * H * 2;
   for (int i = 0; i < W * H; i++) {
     out[i * 2] = uint8_t(core[i] * 255 + 0.5f);
     float g = glow[i] * 1.8f;
-    out[i * 2 + 1] = uint8_t((g > 1 ? 1 : g) * 255 + 0.5f);
+    uint8_t v = uint8_t((g > 1 ? 1 : g) * 255 + 0.5f);
+    out[i * 2 + 1] = v < 6 ? 0 : v;  // the glow's last faint ring is not worth drawing
+  }
+  // Each row's lit stretch, so drawing skips the empty ends
+  for (int y = 0; y < H; y++) {
+    int a = W, b = -1;
+    for (int x = 0; x < W; x++)
+      if (out[(y * W + x) * 2] || out[(y * W + x) * 2 + 1]) a = x < a ? x : a, b = x;
+    spans[y * 2] = uint8_t(a > 255 ? 255 : a), spans[y * 2 + 1] = uint8_t(b < 0 ? 0 : b);
+    if (b < 0) spans[y * 2] = 1, spans[y * 2 + 1] = 0;
   }
   return sprites.emplace(key, s).first->second;
 }
@@ -319,6 +332,7 @@ bool init(const uint8_t *data, size_t len) {
     bool digit = g.cp >= '0' && g.cp <= '9';
     g.left = digit ? 0 : uint8_t(left);
     g.width = digit ? 5 : uint8_t(right - left + 1);
+    if (g.cp < 128) ascii[g.cp] = &g;
   }
   cjk = nullptr, cjkCount = 0;
   if (data && len > 8 && !memcmp(data, "PXF1", 4)) {
@@ -365,33 +379,45 @@ int draw(Face f, int scale, const char *s, float x, int y, uint16_t color, float
   if (clip1 > gfx::W) clip1 = gfx::W;
   uint32_t A = uint32_t(gfx::clamp01(alpha) * 256);
   if (!A) return 0;
-  uint32_t G = uint32_t(GLOW * 256);
-  int at = int(floorf(x + 0.5f)), start = at;
+  // A string clear of the rows being drawn: hanzi reach 11 dots above the
+  // baseline, descenders 2 below, the glow 3 sigma past either
+  int pad = 3 * scale + 1;
+  if (y + 2 * scale + pad < gfx::clipY0 || y - 11 * scale - pad >= gfx::clipY1) return 0;
+  uint32_t G = uint32_t(GLOW * 256), C = gfx::spread(color);
+  int at = gfx::ifloor(x + 0.5f), start = at;
   while (uint32_t cp = next(s)) {
     int adv = advance(f, cp) * scale;
     const Sprite &sp = sprite(f, scale, cp);
     int gx = at + sp.x0, gy = y + sp.y0;
     at += adv;
-    if (!sp.w || gx >= clip1 || gx + sp.w <= clip0) continue;
-    const uint8_t *px = &pool[sp.off];
+    int r0 = rowClip0 > gfx::clipY0 ? rowClip0 : gfx::clipY0, r1 = rowClip1 < gfx::clipY1 ? rowClip1 : gfx::clipY1;
+    if (!sp.w || gx >= clip1 || gx + sp.w <= clip0 || gy >= r1 || gy + sp.h <= r0) continue;
+    const uint8_t *px = &pool[sp.off], *spans = px + sp.w * sp.h * 2;
     for (int r = 0; r < sp.h; r++) {
       int py = gy + r;
-      if (py < rowClip0 || py >= rowClip1) continue;
+      if (py < r0 || py >= r1) continue;
       const uint8_t *row = px + r * sp.w * 2;
-      for (int c = 0; c < sp.w; c++) {
+      int c0 = spans[r * 2], c1 = spans[r * 2 + 1];
+      if (gx + c0 < clip0) c0 = clip0 - gx;
+      if (gx + c1 >= clip1) c1 = clip1 - 1 - gx;
+      uint16_t *line = gfx::fb + py * gfx::W + gx;
+      for (int c = c0; c <= c1; c++) {
         uint32_t dot = row[c * 2], glow = row[c * 2 + 1];
         if (!dot && !glow) continue;
-        int pxx = gx + c;
-        if (pxx < clip0 || pxx >= clip1) continue;
         uint32_t a = A;
         if (fade) {
-          int edge = pxx - clip0 < clip1 - 1 - pxx ? pxx - clip0 : clip1 - 1 - pxx;
+          int pxx = gx + c, edge = pxx - clip0 < clip1 - 1 - pxx ? pxx - clip0 : clip1 - 1 - pxx;
           if (edge < fade) a = a * uint32_t(edge) / uint32_t(fade);
         }
-        int i = py * gfx::W + pxx;
-        // The dot, then its light over it and round it, which runs hot at the centre
-        if (dot) gfx::blend(i, color, (dot * a + 1024) >> 11);
-        if (glow) gfx::add(i, color, (glow * a * G) >> 19);
+        // The dot, then its light over it and round it, which runs hot at the
+        // centre: one read and one write for both
+        uint32_t p = gfx::spread(gfx::swap(line[c]));
+        if (dot) {
+          uint32_t k = (dot * a + 1024) >> 11;
+          p = (C * k + p * (32 - k)) >> 5 & 0x07E0F81F;
+        }
+        if (glow) p = gfx::addSpread(p, C * ((glow * a * G) >> 19) >> 5 & 0x07E0F81F);
+        line[c] = gfx::swap(uint16_t(p | p >> 16));
       }
     }
   }

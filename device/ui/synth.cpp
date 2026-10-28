@@ -1,6 +1,7 @@
 #include "synth.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace synth {
@@ -76,22 +77,43 @@ int render(Cue cue, int16_t *out, int max) {
   const Shape &shape = SHAPES[cue];
   int n = int((shape.length + TAIL_S) * RATE);
   if (n > max) n = max;
-  static float buf[MAX_SAMPLES];
+  if (n > MAX_SAMPLES) n = MAX_SAMPLES;
+  // On the heap: on the device that is PSRAM, where 200 KB can go
+  static float *buf = (float *)malloc(MAX_SAMPLES * sizeof(float));
+  if (!buf) return 0;
   memset(buf, 0, n * sizeof *buf);
-  const float TAU = 6.28318531f;
+  // A sine table and running phases and envelopes: sinf of a growing angle
+  // and expf every sample are far too slow on the ESP32
+  constexpr int TABLE = 1024;
+  static float sine[TABLE + 1];
+  if (sine[TABLE / 4] == 0)
+    for (int i = 0; i <= TABLE; i++) sine[i] = sinf(6.28318531f * i / TABLE);
+  auto wave = [](float phase) {  // phase in turns, 0..1
+    float at = phase * TABLE;
+    int i = int(at);
+    return sine[i] + (sine[i + 1] - sine[i]) * (at - i);
+  };
   for (int k = 0; k < shape.count; k++) {
     const Note &note = shape.notes[k];
     int start = int(note.at * RATE);
-    float f2 = note.freq * 1.0035f;  // the second voice, six cents sharp
+    // The fundamental, the second voice six cents sharp, and the two partials
+    const float freq[4] = {note.freq, note.freq * 1.0035f, note.freq * 2.f, note.freq * 3.01f};
+    const float decay[4] = {note.decay, note.decay, note.decay * 0.5f, note.decay * 0.3f};
+    const float level[4] = {1 / 1.45f, 0.45f / 1.45f, note.bright * 0.5f, note.bright * 0.25f};
+    float phase[4] = {0, 0, 0, 0}, step[4], env[4], fall[4];
+    for (int p = 0; p < 4; p++) step[p] = freq[p] / RATE, env[p] = level[p], fall[p] = expf(-1.f / (decay[p] * RATE));
+    int attack = RATE * 6 / 1000;
     for (int i = start; i < n; i++) {
-      float t = float(i - start) / RATE;
-      float body = expf(-t / note.decay);
-      if (body < 0.0005f) break;
-      float attack = t < 0.006f ? t / 0.006f : 1;
-      float v = (sinf(TAU * note.freq * t) + 0.45f * sinf(TAU * f2 * t)) / 1.45f * body;
-      v += note.bright * 0.5f * sinf(TAU * note.freq * 2.f * t) * expf(-t / (note.decay * 0.5f));
-      v += note.bright * 0.25f * sinf(TAU * note.freq * 3.01f * t) * expf(-t / (note.decay * 0.3f));
-      buf[i] += v * attack * note.level;
+      if (env[0] < 0.0005f) break;
+      float v = 0;
+      for (int p = 0; p < 4; p++) {
+        v += wave(phase[p]) * env[p];
+        phase[p] += step[p];
+        phase[p] -= phase[p] >= 1 ? 1 : 0;
+        env[p] *= fall[p];
+      }
+      int t = i - start;
+      buf[i] += v * (t < attack ? float(t) / attack : 1) * note.level;
     }
   }
   reverb(buf, n);
