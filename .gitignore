@@ -4,3 +4,7 @@ node_modules
 .DS_Store
 *.tsbuildinfo
 device/web/build/
+device/firmware/build/
+device/firmware/agentsmon_display/build/
+device/firmware/agentsmon_display/src/
+device/firmware/agentsmon_display/secrets.h
