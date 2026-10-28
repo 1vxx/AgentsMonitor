@@ -939,7 +939,7 @@ void detailLayer(float a, float e) {
   }
   const Session &s = cur.sessions[i];
   Tone t = tone(s);
-  const char *agent = !strcmp(s.agent, "claude-code") ? "CLAUDE CODE" : !strcmp(s.agent, "codex") ? "CODEX" : s.agent;
+  const char *agent = !strcmp(s.agent, "claude-code") ? "CLAUDE" : !strcmp(s.agent, "codex") ? "CODEX" : s.agent;
   char project[64];
   text::fit(PROP, 3, s.project, 280, project, sizeof project);
   text::centre(LABEL, 3, agent, cx, 108 + lift(1), gfx::c565(TEXT_3), fade(1));
