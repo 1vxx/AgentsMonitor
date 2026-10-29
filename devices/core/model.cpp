@@ -218,6 +218,7 @@ bool parse(const char *json, Summary &out) {
     copy(s.tool, sizeof s.tool, item["tool"]);
     s.status = status(item["status"].str);
     s.since = int64_t(item["since"].num);
+    s.turnSince = int64_t(item["turn_since"].num);
     s.stale = item["stale"].truth;
     const Value &wait = item["attention"];
     if (wait.type == Value::OBJ) {

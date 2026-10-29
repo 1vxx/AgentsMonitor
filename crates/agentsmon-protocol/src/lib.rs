@@ -627,6 +627,11 @@ pub struct SummaryItem {
     pub title: Option<String>,
     pub status: Status,
     pub since: i64,
+    /// When the turn in progress began, however its status has moved since:
+    /// the prompt, or the first subagent still running once the main loop has
+    /// answered. Absent at rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_since: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

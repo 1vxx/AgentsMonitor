@@ -76,6 +76,7 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                 title: s.meta.title.clone(),
                 status: s.status,
                 since: s.status_since,
+                turn_since: turn_since(s),
                 tool: s.tools.last().map(|t| t.tool.clone()),
                 stale: s.stale,
                 attention: s.attention.as_ref().map(|a| AttentionBrief {
@@ -111,6 +112,12 @@ fn tokens(s: &Session) -> u64 {
     t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_write_tokens
 }
 
+/// When the work in flight began: the main turn, else the subagents that
+/// outlive it.
+fn turn_since(s: &Session) -> Option<i64> {
+    s.turn.as_ref().map(|t| t.started_at).or_else(|| s.subagents.first().map(|a| a.started_at))
+}
+
 /// Where a session stands, as the Live view orders its cards. Bands first:
 /// waiting on the person, working, idle, and last anything without a signal,
 /// whatever its status says. Within a band, a moment that moves only on a
@@ -122,8 +129,7 @@ fn board_key(s: &Session) -> (u8, i64) {
     } else if s.status.is_waiting() {
         (0, s.attention.as_ref().map_or(s.status_since, |a| a.since))
     } else if s.status.is_working() {
-        let start = s.turn.as_ref().map(|t| t.started_at).or_else(|| s.subagents.first().map(|a| a.started_at));
-        (1, -start.unwrap_or(s.status_since))
+        (1, -turn_since(s).unwrap_or(s.status_since))
     } else {
         (2, -s.status_since)
     }
@@ -182,6 +188,23 @@ mod tests {
         let keys: Vec<_> = build(all.into_iter(), &[], 100).sessions.into_iter().map(|s| s.key).collect();
         let want = ["asked-first", "asked-next", "late-turn", "early-turn", "idle-new", "idle-long", "quiet"];
         assert_eq!(keys, want.map(|k| format!("claude-code:{k}")));
+    }
+
+    #[test]
+    fn carries_when_the_turn_began_until_it_ends() {
+        let mut s = new_session("claude-code", "a", 0);
+        let since = |s: &Session| build([s].into_iter(), &[], 100).sessions[0].turn_since;
+        assert_eq!(since(&s), None);
+        apply(&mut s, 10, &Event::TurnStart { turn_id: None, agent_id: None, preview: None });
+        apply(&mut s, 20, &Event::ToolStart { id: Some("t".into()), tool: "Bash".into(), agent_id: None, subject: None });
+        apply(&mut s, 30, &Event::ToolEnd { id: Some("t".into()), tool: "Bash".into(), agent_id: None, ok: None, duration_ms: None });
+        apply(&mut s, 40, &Event::TurnStart { turn_id: None, agent_id: Some("g".into()), preview: None });
+        assert_eq!(since(&s), Some(10));
+        // The main loop answers; its subagent runs on
+        apply(&mut s, 50, &Event::TurnEnd { turn_id: None, agent_id: None, outcome: TurnOutcome::Answer, duration_ms: None, usage: None, preview: None });
+        assert_eq!(since(&s), Some(40));
+        apply(&mut s, 60, &Event::TurnEnd { turn_id: None, agent_id: Some("g".into()), outcome: TurnOutcome::Answer, duration_ms: None, usage: None, preview: None });
+        assert_eq!(since(&s), None);
     }
 
     #[test]

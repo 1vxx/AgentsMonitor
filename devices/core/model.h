@@ -21,6 +21,7 @@ struct Session {
   char tool[48];
   Status status;
   int64_t since;
+  int64_t turnSince;  // when the turn in progress began, through every status it moves to; 0 at rest
   bool stale;
   Wait wait;
   int64_t waitSince;

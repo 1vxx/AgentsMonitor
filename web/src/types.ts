@@ -126,6 +126,7 @@ export interface SummaryItem {
   title?: string
   status: Status
   since: number
+  turn_since?: number
   tool?: string
   stale?: boolean
   attention?: { kind: AttentionKind; since: number; tool?: string; subject?: string; message?: string }

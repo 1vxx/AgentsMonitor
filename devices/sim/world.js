@@ -130,6 +130,7 @@ export class World {
           title: s.title,
           status: s.status,
           since: s.since,
+          turn_since: isWorking(s) || isWaiting(s) ? s.turnStart : undefined,
           tool: isWorking(s) || isWaiting(s) ? s.tool : undefined,
           stale: s.stale || undefined,
           attention: s.attention,

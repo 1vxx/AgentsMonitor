@@ -387,15 +387,24 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
       snprintf(out[0], 64, "NEEDS AN ANSWER %s", t);
       snprintf(out[1], 64, "NEEDS AN ANSWER");
       return 2;
-    case Status::Tool:
+    // At work, how long the turn has run, whatever it has thought or run on the way
+    case Status::Tool: {
       toolName(s.tool, tool, sizeof tool);
-      duration(wallMs - s.since, t, sizeof t);
-      snprintf(out[0], 64, "RUNNING %s %s", tool, t);
-      snprintf(out[1], 64, "RUNNING %s", tool);
-      snprintf(out[2], 64, "%s", tool);
-      return 3;
+      int n = 0;
+      if (s.turnSince) {
+        duration(wallMs - s.turnSince, t, sizeof t);
+        snprintf(out[n++], 64, "RUNNING %s %s", tool, t);
+      }
+      snprintf(out[n++], 64, "RUNNING %s", tool);
+      snprintf(out[n++], 64, "%s", tool);
+      return n;
+    }
     case Status::Thinking:
-      duration(wallMs - s.since, t, sizeof t);
+      if (!s.turnSince) {
+        snprintf(out[0], 64, "THINKING");
+        return 1;
+      }
+      duration(wallMs - s.turnSince, t, sizeof t);
       snprintf(out[0], 64, "THINKING %s", t);
       return 1;
     case Status::Compacting: snprintf(out[0], 64, "COMPACTING"); return 1;
