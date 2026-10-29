@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🧭 Usage guide and troubleshooting
+    url: https://github.com/1vxx/AgentsMonitor/blob/main/docs/USAGE.md
+    about: Configuration, how things are counted, and fixes for common problems
+  - name: 📟 Devices guide
+    url: https://github.com/1vxx/AgentsMonitor/blob/main/devices/README.md
+    about: Flashing the reference board and porting to your own hardware

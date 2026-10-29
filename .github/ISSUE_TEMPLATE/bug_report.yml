@@ -1,0 +1,43 @@
+name: 🐛 Bug report
+description: Something doesn't work as the docs say it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time! The [troubleshooting table](https://github.com/1vxx/AgentsMonitor/blob/main/docs/USAGE.md#troubleshooting) solves the most common problems, so it's worth a quick look first.
+        用中文填写也完全可以。
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part?
+      multiple: true
+      options:
+        - Daemon or CLI
+        - Claude Code plugin
+        - Codex plugin
+        - Web dashboard
+        - Display device or review page
+        - Docs
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: OS, and the versions of Claude Code or Codex if they're involved
+      placeholder: macOS 27, Claude Code 2.1.308, Codex 0.160.1
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Output of `agentsmon status`, and of `AGENTSMON_LOG=debug agentsmon serve` around the problem (the login service logs to `~/.agentsmon/agentsmon.log`). For a device, its serial log. Please remove anything private, such as project names or prompts.
+      render: text

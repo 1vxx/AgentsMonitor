@@ -9,7 +9,7 @@ Reports what a Claude Code session is doing to the local [AgentsMonitor](../../R
 - **Resilient.** While the daemon is down, up to 1,000 events wait and are sent in order once it is back. A heartbeat every 20 s keeps the session marked live and corrects work whose end event was lost.
 - **No phantom sessions.** Terminal sessions appear at launch. Claude Desktop and SDK sessions appear on first use, so the spare session Claude Desktop keeps warm stays out of the monitor.
 
-Token counts in the dashboard are exact only with OpenTelemetry export enabled; see [Enable exact token counts](../../README.md#3-enable-exact-token-counts). Without it, the plugin's per-turn usage provides an estimate.
+Token counts don't depend on the plugin: the daemon reads every request's exact counts from Claude Code's transcripts. The usage the plugin reports at each turn's end is only an estimate to go on until the first request is read, or where a transcript can't be read. See [Token counts and usage limits](../../docs/USAGE.md#token-counts-and-usage-limits).
 
 ## Setup
 

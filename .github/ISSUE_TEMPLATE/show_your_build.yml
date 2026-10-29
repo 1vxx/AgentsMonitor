@@ -1,0 +1,46 @@
+name: 🐾 Show your build
+description: Built a display, ported it to a new board, or made a theme? Show it off!
+title: "[Build] "
+labels: [showcase]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We love seeing AgentsMonitor on other people's desks. Every board, screen and idea is welcome, from polished builds to breadboards held together with tape.
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: The board and the screen
+      placeholder: ESP32-S3 DevKitC + 2.1" round GC9A01
+    validations:
+      required: true
+  - type: dropdown
+    id: software
+    attributes:
+      label: What does it run?
+      options:
+        - halo
+        - pets
+        - My own theme
+        - My own code reading the API
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Photos or a video
+      description: Drag images or a short clip in here
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: What was tricky, what you'd change, and a link to your code if it's public
+  - type: checkboxes
+    id: upstream
+    attributes:
+      label: Upstream
+      options:
+        - label: I'd like to contribute this board or program to the repository

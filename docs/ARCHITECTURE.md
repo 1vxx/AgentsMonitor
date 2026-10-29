@@ -163,9 +163,9 @@ Neither the protocol nor the reducer changes; Codex was added this way.
 3. **Tokens and rate limits.** Read the agent's own logs as `claude.rs` and `codex.rs` do (`tail::Position` and `tail::Head` do the reading on) and hand the hub `UsageRecord`s and `Observed` readings, or rate limits with `Hub::note_rate_limits`. Map its OpenTelemetry events in `adapters::usage_from_otel` when they carry a request id.
 4. **Dashboard.** Name it in `web/src/agents.ts`; agents not listed there appear under their own name.
 
-## Display device
+## Display devices
 
-The ESP32 display (1.75" AMOLED) is the next phase. The data it needs is already served:
+Displays live in `devices/` (see its [README](../devices/README.md)): a portable C++ core whose host implements `devices/core/ui.h` for the boards, themes that implement `devices/core/theme.h` (see the [theme guide](../devices/themes/README.md)), and one folder of drivers per board. The reference board polls the summary once a second over Wi-Fi; the review page runs the same code in WebAssembly. What a display reads:
 
 - `GET /v1/summary` returns a compact summary: the overall `mood`, counts per status, the first eight sessions in the Live view's order (waiting for you, longest wait first; working, newest turn first; idle, latest to finish first; no signal last) and each agent's rate limits. Each session carries what it waits for (`attention`: the kind, the tool and its subject, cut to 120 chars) and how its last turn ended (`last_turn`), so a display can show what to approve and tell a finished turn from a failed one. The WebSocket sends a `summary` message only when the summary changes.
 - `mood` is a single signal for the animation: `attention` (someone waits for you) > `working` > `error` (a turn failed in the last 5 min) > `idle` > `offline`.
