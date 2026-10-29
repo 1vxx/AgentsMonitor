@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 pub const LABEL: &str = "dev.agentsmon.daemon";
 
@@ -46,6 +47,20 @@ fn launchctl(args: &[&str]) -> Result<String, String> {
     if out.status.success() { Ok(text) } else { Err(text.trim().to_string()) }
 }
 
+/// Waits for a service just booted out to leave launchd. `bootout` returns
+/// while the daemon still shuts down (it flushes the store first), and a
+/// `bootstrap` before it has left fails with "5: Input/output error".
+fn gone(target: &str) -> bool {
+    let until = Instant::now() + Duration::from_secs(15);
+    while launchctl(&["print", target]).is_ok() {
+        if Instant::now() > until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    true
+}
+
 pub fn install() -> Result<(), String> {
     if !cfg!(target_os = "macos") {
         return Err("only macOS (launchd) is supported for now; run `agentsmon serve` under your service manager".into());
@@ -57,7 +72,11 @@ pub fn install() -> Result<(), String> {
     let path = plist_path();
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     // Replace a loaded copy so a new binary path takes effect.
-    let _ = launchctl(&["bootout", &format!("{}/{LABEL}", domain())]);
+    let target = format!("{}/{LABEL}", domain());
+    let _ = launchctl(&["bootout", &target]);
+    if !gone(&target) {
+        return Err("the running daemon is still stopping; run this again in a moment".into());
+    }
     std::fs::write(&path, plist(&exe.to_string_lossy(), &log.to_string_lossy(), &home.to_string_lossy()))
         .map_err(|e| e.to_string())?;
     launchctl(&["bootstrap", &domain(), &path.to_string_lossy()])?;
