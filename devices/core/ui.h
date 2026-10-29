@@ -3,10 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The display's screens and behaviour, with no platform underneath: the
-// firmware and the review page both feed it summaries and touches, and take
-// frames and chimes from it. Each display program in devices/apps implements
-// this, so any of them runs on any board whose screen it fits.
+// The display as a board sees it, with no platform underneath: the firmware
+// and the review page both feed it summaries and touches, and take frames and
+// chimes from it. host.cpp implements it on top of the theme in the build
+// (theme.h), so any theme runs on any board whose screen it fits.
 namespace ui {
 
 enum Link { CONNECTING, ONLINE, LOST };

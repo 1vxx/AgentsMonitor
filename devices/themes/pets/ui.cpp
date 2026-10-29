@@ -34,8 +34,6 @@
 // that a finger can carry and take back halfway; everything lands on the
 // board's grid, so it moves a dot at a time.
 
-#include "ui.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,14 +43,16 @@
 
 #include "board.h"
 #include "events.h"
+#include "gesture.h"
 #include "gfx.h"
 #include "model.h"
 #include "spring.h"
 #include "sprites.h"
 #include "synth.h"
 #include "text.h"
+#include "theme.h"
 
-namespace ui {
+namespace pets {
 namespace {
 
 using board::MID;
@@ -62,6 +62,11 @@ using gfx::RGB;
 using model::Outcome;
 using model::Session;
 using model::Status;
+using ui::CONNECTING;
+using ui::Link;
+using ui::LOST;
+using ui::ONLINE;
+using ui::Touch;
 
 // ---------- Look ----------
 
@@ -86,7 +91,6 @@ constexpr int64_t NEWS_MS = 4000;       // and the line about it at the top
 constexpr int64_t UNSEEN_MS = 60 * 60000;  // a finished turn nobody opened stays this long
 constexpr int64_t NUDGE_MS = 5 * 60000;    // and chimes again once, this long after
 constexpr float MOVE_PX = 220;          // a finger this far carries a move all the way
-constexpr int64_t TWICE_MS = 450;       // the side button pressed again this soon: twice
 
 // ---------- State ----------
 
@@ -98,11 +102,11 @@ Spring slide;           // ONE or the alert carried sideways, in cells
 char besideKey[96];     // the page next to it while it slides
 constexpr float PAGE = 108;  // cells between pages side by side, a title's width and a gap
 
-Link linkState = CONNECTING;
-model::Summary cur;
-bool haveSummary;
-events::Tracker tracker;
-int64_t nowMs, lastMs, wallMs, summaryAt, summaryTs, lastTouch, alertUntil, alertAt, busyAt;
+// The summary, the link, the clocks and the waits, kept by the host
+const theme::State &host = theme::state();
+const model::Summary &cur = host.summary;
+const events::Tracker &tracker = host.waits;
+int64_t lastTouch, alertUntil, alertAt, busyAt;
 char alertKey[96], oneKey[96], chosenKey[96];  // on the alert; on ONE; picked by a finger
 int64_t chosenAt;
 float dimK = 1;
@@ -113,8 +117,6 @@ struct {
   Outcome outcome;
   int64_t at = -100000;
 } news;
-
-int cues[8], cueHead, cueTail;
 
 struct Pet {
   bool used, leaving, placed;
@@ -150,14 +152,8 @@ int64_t legendAt = -100000;       // when its entrance began
 // Touch
 enum class Drag { None, Undecided, Slide, Move };
 Drag drag = Drag::None;
-int downX, downY;
-int64_t downAt;
+gesture::Finger finger;
 Screen moveFrom;
-struct Sample {
-  int x, y;
-  int64_t ms;
-} samples[6];
-int sampleCount;
 int pressed = -1;  // the pet a finger rests on
 
 // Timings, for the logs
@@ -175,12 +171,6 @@ uint32_t hash(const char *s) {
 inline int iround(float v) { return gfx::ifloor(v + 0.5f); }
 inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-void pushCue(synth::Cue c) {
-  int next = (cueTail + 1) % 8;
-  if (next == cueHead) return;
-  cues[cueTail] = c;
-  cueTail = next;
-}
 
 const Session *find(const char *key) { return key[0] ? events::find(cur, key) : nullptr; }
 
@@ -190,7 +180,7 @@ Pet *petOf(const char *key) {
   return nullptr;
 }
 
-bool online() { return linkState == ONLINE && haveSummary; }
+bool online() { return host.link == ONLINE && host.have; }
 
 // Whether a pet shows as the dragon: once its entrance has begun
 bool dragonNow(const Pet &p) { return p.legend && !legendDue; }
@@ -335,7 +325,7 @@ enum Act { THINK, TOOL, PACK, WAIT, NAP, DONE, FAIL, DARK, GONE };
 // session since, nor tapped the pet: for an hour, until someone does
 bool unseen(const Pet &p, const Session &s) {
   bool ended = s.outcome == Outcome::Answer || s.outcome == Outcome::Error || s.outcome == Outcome::Refusal;
-  return ended && s.endedAt && !s.seen && !s.stale && p.tappedEnd != s.endedAt && wallMs - s.endedAt < UNSEEN_MS &&
+  return ended && s.endedAt && !s.seen && !s.stale && p.tappedEnd != s.endedAt && host.wall - s.endedAt < UNSEEN_MS &&
          !model::working(s.status) && !events::waiting(s);
 }
 
@@ -349,7 +339,7 @@ Act actOf(const Pet &p, const Session *s) {
     case Status::Compacting: return PACK;
     default: break;
   }
-  if (nowMs - p.endAt < CHEER_MS) {
+  if (host.now - p.endAt < CHEER_MS) {
     if (p.endHow == Outcome::Answer) return DONE;
     if (p.endHow == Outcome::Error || p.endHow == Outcome::Refusal) return FAIL;
   }
@@ -378,12 +368,12 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
   }
   switch (s.status) {
     case Status::WaitingPermission:
-      duration(wallMs - events::waitSince(s), t, sizeof t);
+      duration(host.wall - events::waitSince(s), t, sizeof t);
       snprintf(out[0], 64, "NEEDS APPROVAL %s", t);
       snprintf(out[1], 64, "NEEDS APPROVAL");
       return 2;
     case Status::WaitingInput:
-      duration(wallMs - events::waitSince(s), t, sizeof t);
+      duration(host.wall - events::waitSince(s), t, sizeof t);
       snprintf(out[0], 64, "NEEDS AN ANSWER %s", t);
       snprintf(out[1], 64, "NEEDS AN ANSWER");
       return 2;
@@ -392,7 +382,7 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
       toolName(s.tool, tool, sizeof tool);
       int n = 0;
       if (s.turnSince) {
-        duration(wallMs - s.turnSince, t, sizeof t);
+        duration(host.wall - s.turnSince, t, sizeof t);
         snprintf(out[n++], 64, "RUNNING %s %s", tool, t);
       }
       snprintf(out[n++], 64, "RUNNING %s", tool);
@@ -404,7 +394,7 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
         snprintf(out[0], 64, "THINKING");
         return 1;
       }
-      duration(wallMs - s.turnSince, t, sizeof t);
+      duration(host.wall - s.turnSince, t, sizeof t);
       snprintf(out[0], 64, "THINKING %s", t);
       return 1;
     case Status::Compacting: snprintf(out[0], 64, "COMPACTING"); return 1;
@@ -412,7 +402,7 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
   }
   // Not yet seen: NEW, and how long it has waited to be
   if (fresh) {
-    int64_t m = (wallMs - s.endedAt) / 60000;
+    int64_t m = (host.wall - s.endedAt) / 60000;
     const char *what = s.outcome == Outcome::Answer ? "DONE" : s.outcome == Outcome::Refusal ? "REFUSED" : "FAILED";
     if (m < 1)
       snprintf(out[0], 64, "%s · NEW", what);
@@ -421,7 +411,7 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
     snprintf(out[1], 64, "%s · NEW", what);
     return 2;
   }
-  age(wallMs - (s.endedAt ? s.endedAt : s.since), t, sizeof t);
+  age(host.wall - (s.endedAt ? s.endedAt : s.since), t, sizeof t);
   switch (s.outcome) {
     case Outcome::Error: snprintf(out[0], 64, "FAILED %s", t); return 1;
     case Outcome::Refusal: snprintf(out[0], 64, "REFUSED %s", t); return 1;
@@ -511,8 +501,8 @@ void go(Screen s, bool byFinger = false) {
 
 void callOut(const char *key) {
   snprintf(alertKey, sizeof alertKey, "%s", key);
-  alertAt = nowMs;
-  alertUntil = nowMs + TAKEOVER_MS;
+  alertAt = host.now;
+  alertUntil = host.now + TAKEOVER_MS;
   drag = Drag::None;
   pressed = -1;
   go(ALERT);
@@ -548,7 +538,7 @@ const Session *focus() {
   if (chosenKey[0]) {
     const Session *s = find(chosenKey);
     int64_t last = chosenAt > lastTouch ? chosenAt : lastTouch;
-    if (s && (drag != Drag::None || nowMs - last < FOCUS_MS)) return s;
+    if (s && (drag != Drag::None || host.now - last < FOCUS_MS)) return s;
     chosenKey[0] = 0;
   }
   if (!tracker.count) {
@@ -559,9 +549,9 @@ const Session *focus() {
       const Pet *op = petOf(o.key);
       if (op && unseen(*op, o) && (!best || o.endedAt > best->endedAt)) best = &o;
     }
-    if (best && !(nowMs - news.at < STAR_MS && find(news.key))) return best;
+    if (best && !(host.now - news.at < STAR_MS && find(news.key))) return best;
   }
-  if (!tracker.count && nowMs - news.at < STAR_MS)
+  if (!tracker.count && host.now - news.at < STAR_MS)
     if (const Session *s = find(news.key)) return s;
   return cur.count ? &cur.sessions[0] : nullptr;
 }
@@ -569,7 +559,7 @@ const Session *focus() {
 void choose(const char *key) {
   snprintf(chosenKey, sizeof chosenKey, "%s", key);
   snprintf(oneKey, sizeof oneKey, "%s", key);
-  chosenAt = nowMs;
+  chosenAt = host.now;
 }
 
 // ---------- Following the summaries ----------
@@ -581,47 +571,40 @@ void crown(const char *key) {
   if (!p) return;
   p->legend = true;
   // A coat at random: the clocks, the steady one and the wall's, vary every call
-  uint32_t seed = hash(key) ^ uint32_t(nowMs) * 2654435761u ^ uint32_t(wallMs) * 40503u;
+  uint32_t seed = hash(key) ^ uint32_t(host.now) * 2654435761u ^ uint32_t(host.wall) * 40503u;
   p->coat = uint8_t(int(noise(seed) * sprites::COATS) % sprites::COATS);
   snprintf(legendKey, sizeof legendKey, "%s", key);
   legendDue = true;
 }
 
-void follow(const model::Summary &next) {
-  events::Event evs[2 * model::MAX];
-  int n = tracker.follow(haveSummary ? &cur : nullptr, next, evs, 2 * model::MAX);
-  const char *call = nullptr;
-  for (int k = 0; k < n; k++) {
-    const events::Event &e = evs[k];
-    if (e.kind == events::WAIT) {
-      pushCue(synth::ATTENTION);
-      call = e.key;
-    } else if (e.kind == events::END) {
-      bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
-      if (e.outcome == Outcome::Answer || failed) pushCue(failed ? synth::ERROR : synth::DONE);
-      if (Pet *p = petOf(e.key)) p->endAt = nowMs, p->endHow = e.outcome;
-      // Ten turns in a row finished well, across every session, call the dragon
-      if (e.outcome == Outcome::Answer) {
-        if (++streak >= STREAK) crown(e.key), streak = 0;
-      } else if (failed) {
-        streak = 0;
-      }
-      snprintf(news.key, sizeof news.key, "%s", e.key);
-      news.outcome = e.outcome;
-      news.at = nowMs;
+// The last session in a summary's events to start waiting, called out once
+// the summary is in
+char calling[96];
+
+// A session starts waiting: its pet is called out. A turn ends: its pet
+// smiles or winces, and good ones count towards the dragon.
+void happened(const events::Event &e) {
+  if (e.kind == events::WAIT) {
+    snprintf(calling, sizeof calling, "%s", e.key);
+  } else if (e.kind == events::END) {
+    bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
+    if (Pet *p = petOf(e.key)) p->endAt = host.now, p->endHow = e.outcome;
+    // Ten turns in a row finished well, across every session, call the dragon
+    if (e.outcome == Outcome::Answer) {
+      if (++streak >= STREAK) crown(e.key), streak = 0;
+    } else if (failed) {
+      streak = 0;
     }
+    snprintf(news.key, sizeof news.key, "%s", e.key);
+    news.outcome = e.outcome;
+    news.at = host.now;
   }
-  cur = next;
-  haveSummary = true;
-  tracker.prune(cur);
-  if (call) callOut(call);
-  if (!tracker.count && to == ALERT) go(ONE);
 }
 
 // Pets keep their animal and place across summaries, matched by key
 void syncPets() {
   for (Pet &p : pets)
-    if (p.used && !p.leaving && !find(p.key)) p.leaving = true, p.goneAt = nowMs;
+    if (p.used && !p.leaving && !find(p.key)) p.leaving = true, p.goneAt = host.now;
   for (int i = 0; i < cur.count; i++) {
     const Session &s = cur.sessions[i];
     if (Pet *p = petOf(s.key)) {
@@ -648,9 +631,9 @@ void syncPets() {
     p.animal = a;
     p.order = ++arrivals;
     p.phase = (hash(s.key) >> 8 & 1023) / 97.f;
-    p.bornAt = nowMs;
+    p.bornAt = host.now;
     p.endAt = p.pokeAt = -100000;
-    if (wallMs - s.endedAt >= NUDGE_MS) p.nudgedEnd = s.endedAt;  // found past its chime: none at start-up
+    if (host.wall - s.endedAt >= NUDGE_MS) p.nudgedEnd = s.endedAt;  // found past its chime: none at start-up
     text::upper(s.project, p.label, sizeof p.label);
   }
 }
@@ -691,8 +674,7 @@ void step(float dt) {
 
   // Reminders for waits nobody has answered call the pet back out
   events::Event due[model::MAX];
-  for (int k = 0, m = tracker.remind(wallMs, due, model::MAX); k < m; k++) {
-    pushCue(synth::REMIND);
+  for (int k = 0, m = theme::reminders(due, model::MAX); k < m; k++) {
     if (drag == Drag::None) callOut(due[k].key);
   }
 
@@ -701,16 +683,16 @@ void step(float dt) {
     int at = -1;
     for (int k = 0; k < tracker.count; k++)
       if (!strcmp(tracker.waits[k].key, alertKey)) at = k;
-    if (!tracker.count || nowMs >= alertUntil) {
+    if (!tracker.count || host.now >= alertUntil) {
       go(ONE);
-    } else if (at < 0 || (tracker.count > 1 && drag == Drag::None && nowMs - alertAt >= ROTATE_MS)) {
+    } else if (at < 0 || (tracker.count > 1 && drag == Drag::None && host.now - alertAt >= ROTATE_MS)) {
       // The next one comes in from the right, pushing this one out
       if (at >= 0) snprintf(besideKey, sizeof besideKey, "%s", alertKey), slide.x = PAGE, slide.v = 0;
       snprintf(alertKey, sizeof alertKey, "%s", tracker.waits[(at + 1) % tracker.count].key);
-      alertAt = nowMs;
+      alertAt = host.now;
     }
   }
-  if (to == ALL && drag == Drag::None && nowMs - lastTouch > AWAY_MS) go(ONE);
+  if (to == ALL && drag == Drag::None && host.now - lastTouch > AWAY_MS) go(ONE);
 
   // ONE follows whoever leads; a new one comes in from its side in ALL's
   // order, pushing the last out the other way
@@ -746,28 +728,28 @@ void step(float dt) {
   // Its entrance, on ONE, once nobody waits on the alert
   if (legendDue && to != ALERT && drag == Drag::None) {
     legendDue = false;
-    legendAt = nowMs;
-    pushCue(synth::LEGEND);
+    legendAt = host.now;
+    theme::chime(synth::LEGEND);
     choose(legendKey);
     go(ONE);
   }
 
   // All quiet for a while, the board dims; lost, it dims a little
   for (int i = 0; i < cur.count; i++)
-    if (events::waiting(cur.sessions[i]) || model::working(cur.sessions[i].status)) busyAt = nowMs;
+    if (events::waiting(cur.sessions[i]) || model::working(cur.sessions[i].status)) busyAt = host.now;
   // A finished turn nobody has opened keeps the board awake, and chimes
   // once more when it has waited 5 minutes
   for (Pet &p : pets) {
     if (!p.used || p.leaving) continue;
     const Session *s = find(p.key);
     if (!s || !unseen(p, *s)) continue;
-    busyAt = nowMs;
-    if (wallMs - s->endedAt >= NUDGE_MS && p.nudgedEnd != s->endedAt) {
+    busyAt = host.now;
+    if (host.wall - s->endedAt >= NUDGE_MS && p.nudgedEnd != s->endedAt) {
       p.nudgedEnd = s->endedAt;
-      pushCue(s->outcome == Outcome::Answer ? synth::DONE : synth::REMIND);
+      theme::chime(s->outcome == Outcome::Answer ? synth::DONE : synth::REMIND);
     }
   }
-  float want = !online() ? 0.75f : nowMs - busyAt > NAP_MS ? 0.55f : 1;
+  float want = !online() ? 0.75f : host.now - busyAt > NAP_MS ? 0.55f : 1;
   dimK += (want - dimK) * gfx::clamp01(dt * 1.5f);
 }
 
@@ -812,7 +794,7 @@ Box animal(int which, float cx, float top, float k, float squash, Eyes eyes, flo
       uint16_t c = ink[uint8_t(ch) & 127];
       // Stars come and go in the cosmic dragon's wings
       if (which == DRAGON + sprites::COSMIC && (ch == 'W' || ch == 'M') &&
-          noise(uint32_t(sx * 31 + sy * 977) + uint32_t(nowMs / 350) * 7919) > 0.94f)
+          noise(uint32_t(sx * 31 + sy * 977) + uint32_t(host.now / 350) * 7919) > 0.94f)
         c = white;
       if (glow > 0) c = mix565(c, gfx::c565(coatFire[which >= DRAGON ? which - DRAGON : 0][0]), glow);
       board::light(x0 + xx, y0 + yy, c, ch == 'C' ? a * 0.75f : a);
@@ -840,12 +822,12 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
   if (which < 0) which = lookOf(p);
   bool dragon = which >= DRAGON;
   if (dragon) coatNow = which - DRAGON;
-  float t = nowMs / 1000.f + p.phase;
+  float t = host.now / 1000.f + p.phase;
   int u = iround(at.k / 2) < 1 ? 1 : iround(at.k / 2);  // cells a pixel for its marks
   Eyes eyes = fmodf(t * 0.27f, 1) < 0.035f ? SHUT : OPEN;  // a blink now and then
   int dx = 0, dy = 0;
   float squash = 1;
-  float since = (nowMs - p.endAt) / 1000.f;
+  float since = (host.now - p.endAt) / 1000.f;
   switch (act) {
     case THINK: dy = (int(t * 1.6f) & 1) * u; break;
     case TOOL: dy = (int(t * 7) & 1) * u; break;
@@ -869,7 +851,7 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
     case DARK: eyes = SHUT, a *= 0.32f; break;
     case GONE:
       if (dragon) {
-        float g = (nowMs - p.goneAt) / 1000.f;  // it beats its wings and is off
+        float g = (host.now - p.goneAt) / 1000.f;  // it beats its wings and is off
         dy = -iround(g * g * 45);
       } else {
         eyes = SMILE, a *= 0.6f;
@@ -884,7 +866,7 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
     flap = act == WAIT || act == GONE ? (int(t * 9) & 1) : (f < 0.5f && (int(f * 8) & 1));
   }
   // Arriving, it hops in; poked, it hops
-  float born = (nowMs - p.bornAt) / 1000.f, poke = (nowMs - p.pokeAt) / 1000.f;
+  float born = (host.now - p.bornAt) / 1000.f, poke = (host.now - p.pokeAt) / 1000.f;
   if (born < 0.7f) dy -= iround(fabsf(sinf(born * 9)) * 2 * u);
   if (poke < 0.7f) dy -= iround(fabsf(sinf(poke * 9)) * 2 * u), eyes = SMILE;
   if (press) squash *= 0.86f;
@@ -984,7 +966,7 @@ void ring(float cx, float cy, float r, uint16_t c, float a) {
 // caught, flickering, then dying down
 void groundFire(float cx, int ground, float f, float a) {
   float reach = gfx::clamp01(f / 0.3f) * 46, fade = f < 1.0f ? 1 : gfx::clamp01((1.5f - f) / 0.5f);
-  uint32_t tick = uint32_t(nowMs / 50);
+  uint32_t tick = uint32_t(host.now / 50);
   for (int x = -iround(reach); x <= iround(reach); x++) {
     float d = fabsf(float(x)) / 46;
     float h = (1.5f + 5 * (1 - d)) * (0.45f + 0.55f * noise(uint32_t(x + 200) * 31 + tick)) * fade;
@@ -1065,7 +1047,7 @@ void allText(float a) {
   Pet *order[PETS];
   int n = ranked(order);
   int headY = n >= 7 ? 7 : 18;
-  float t = nowMs / 1000.f;
+  float t = host.now / 1000.f;
 
   // The line at the top: who needs you, what just happened, else how they are
   char lines[3][64];
@@ -1074,7 +1056,7 @@ void allText(float a) {
   float al = 0.55f;
   if (!online()) {
     static const char *const DOTS[] = {"", ".", "..", "..."};
-    snprintf(lines[m++], 64, "%s%s", linkState == LOST ? "OFFLINE" : "CONNECTING", linkState == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
+    snprintf(lines[m++], 64, "%s%s", host.link == LOST ? "OFFLINE" : "CONNECTING", host.link == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
     c = dim;
   } else if (tracker.count) {
     Pet *p = petOf(tracker.waits[0].key);
@@ -1086,7 +1068,7 @@ void allText(float a) {
       snprintf(lines[m++], 64, "NEEDS YOU");
     }
     c = amber, al = 0.7f + 0.3f * sinf(t * 4);
-  } else if (nowMs - news.at < NEWS_MS && petOf(news.key)) {
+  } else if (host.now - news.at < NEWS_MS && petOf(news.key)) {
     const char *who = looks(lookOf(*petOf(news.key))).name;
     switch (news.outcome) {
       case Outcome::Answer: snprintf(lines[m++], 64, "%s IS DONE!", who), c = green, al = 0.9f; break;
@@ -1264,7 +1246,7 @@ void marquee(bool small, const char *s, float cx, int y, int maxW, uint16_t c, f
   }
   constexpr int PAD = 4, GAP = 18;  // cells in from the window's edge at rest; between the copies
   int x0 = iround(cx - maxW / 2.f), loop = w + GAP;
-  float t = (nowMs - since) / 1000.f - 2;
+  float t = (host.now - since) / 1000.f - 2;
   int off = t <= 0 ? 0 : int(fmodf(t * 9, float(loop)));  // 9 dots a second
   board::clip(x0 > pageL ? x0 : pageL, x0 + maxW < pageR ? x0 + maxW : pageR, PAD);
   for (int k = 0; k < 2; k++) {
@@ -1289,7 +1271,7 @@ void onePage(const char *key, float cx, float a, int64_t since) {
   Act act = p ? actOf(*p, s) : NAP;
 
   // The dragon's entrance: the words step back for its name, in its coat's colour
-  float le = p && dragonNow(*p) ? (nowMs - legendAt) / 1000.f : 99;
+  float le = p && dragonNow(*p) ? (host.now - legendAt) / 1000.f : 99;
   float hush = le < 0.3f ? 1 - 0.8f * le / 0.3f : le < ARRIVE_S ? 0.2f : le < ARRIVE_S + 0.6f ? 0.2f + 0.8f * (le - ARRIVE_S) / 0.6f : 1;
   float banner = le < 2.0f ? 0 : le < 2.3f ? (le - 2.0f) / 0.3f : le < ARRIVE_S ? 1 : le < ARRIVE_S + 0.5f ? 1 - (le - ARRIVE_S) / 0.5f : 0;
   if (banner > 0) {
@@ -1314,7 +1296,7 @@ void onePage(const char *key, float cx, float a, int64_t since) {
   // What it is doing; not connected, that first
   char opts[3][64], state[64];
   int n = stateLines(*s, opts, p && unseen(*p, *s));
-  if (!online()) n = 1, snprintf(opts[0], 64, "%s", linkState == LOST ? "OFFLINE" : "CONNECTING...");
+  if (!online()) n = 1, snprintf(opts[0], 64, "%s", host.link == LOST ? "OFFLINE" : "CONNECTING...");
   pickTiny(opts, n, roomAt(79), state, sizeof state);
   board::tinyCentre(state, cx, 77, online() ? actColor(act) : dim, 0.9f * a);
 
@@ -1363,7 +1345,7 @@ void onePage(const char *key, float cx, float a, int64_t since) {
 }
 
 void oneText(float a) {
-  float t = nowMs / 1000.f;
+  float t = host.now / 1000.f;
   if (!find(oneKey)) {
     // Nobody here: a Z drifts where a pet would be; or not connected yet
     static const char *const DOTS[] = {"", ".", "..", "..."};
@@ -1371,18 +1353,18 @@ void oneText(float a) {
     if (online())
       snprintf(msg, sizeof msg, "NO SESSIONS");
     else
-      snprintf(msg, sizeof msg, "%s%s", linkState == LOST ? "OFFLINE" : "CONNECTING", linkState == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
+      snprintf(msg, sizeof msg, "%s%s", host.link == LOST ? "OFFLINE" : "CONNECTING", host.link == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
     board::tinyCentre(msg, MID, 70, dim, 0.7f * a);
     float ph = fmodf(t * 0.3f, 1);
     board::tinyCentre("Z", MID + iround(ph * 4), 52 - iround(ph * 10), white, 0.5f * (1 - ph) * a, 2);
     return;
   }
   // A new pet's lines start scrolling from the start
-  if (strcmp(titleKey, oneKey)) snprintf(titleKey, sizeof titleKey, "%s", oneKey), titleSince = nowMs;
+  if (strcmp(titleKey, oneKey)) snprintf(titleKey, sizeof titleKey, "%s", oneKey), titleSince = host.now;
   // The page beside, while it slides, with its lines at rest
   float bx;
   if (besideShows(bx))
-    twoPages(slide.x, bx, [&](bool beside, float cx) { onePage(beside ? besideKey : oneKey, cx, a, beside ? nowMs : titleSince); });
+    twoPages(slide.x, bx, [&](bool beside, float cx) { onePage(beside ? besideKey : oneKey, cx, a, beside ? host.now : titleSince); });
   else
     onePage(oneKey, MID + slide.x, a, titleSince);
 
@@ -1411,7 +1393,7 @@ const int8_t STEPS[8][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-
 void compose() {
   board::clear();
   board::level(dimK);
-  int k = int(nowMs / SHIFT_MS % 8);
+  int k = int(host.now / SHIFT_MS % 8);
   board::nudge(STEPS[k][0], STEPS[k][1]);
 
   float one = shown(ONE), all = shown(ALL), al = shown(ALERT);
@@ -1429,7 +1411,7 @@ void compose() {
     alpha *= p.shown;
     if (alpha < 0.02f) continue;
     const Session *ps = p.leaving ? nullptr : find(p.key);
-    float le = (nowMs - legendAt) / 1000.f;
+    float le = (host.now - legendAt) / 1000.f;
     if (dragonNow(p) && le < ARRIVE_S && from == ONE && to == ONE && !strcmp(p.key, oneKey)) {
       entrance(p, ps, at, alpha, le);
       continue;
@@ -1451,17 +1433,6 @@ int petAt(int x, int y) {
     if (ci >= p.x.x - w / 2 - 3 && ci <= p.x.x + w / 2 + 3 && cj >= p.y.x - 3 && cj <= p.y.x + h + 6) return i;
   }
   return -1;
-}
-
-void velocity(float &vx, float &vy) {
-  vx = vy = 0;
-  if (sampleCount < 2) return;
-  const Sample &last = samples[(sampleCount - 1) % 6];
-  int oldest = sampleCount > 6 ? sampleCount - 6 : 0, k = sampleCount - 2;
-  while (k > oldest && last.ms - samples[k % 6].ms < 60) k--;
-  const Sample &s = samples[k % 6];
-  float dt = (last.ms - s.ms) / 1000.f;
-  if (dt > 0) vx = (last.x - s.x) / dt, vy = (last.y - s.y) / dt;
 }
 
 // The big pet on ONE under a panel pixel, or -1
@@ -1496,10 +1467,10 @@ const char *nextPage(int dir) {
 
 void tap(int x, int y) {
   // Any tap answers the reminders of the waits there are
-  tracker.ack();
+  theme::ack();
   switch (to) {
     case ALERT:
-      alertUntil = nowMs;
+      alertUntil = host.now;
       go(ONE);
       break;
     case ALL: {
@@ -1514,7 +1485,7 @@ void tap(int x, int y) {
     case ONE: {
       int i = onePetAt(x, y);
       if (i >= 0) {
-        pets[i].pokeAt = nowMs;
+        pets[i].pokeAt = host.now;
         if (const Session *s = find(pets[i].key)) pets[i].tappedEnd = s->endedAt;
       }
       break;
@@ -1537,7 +1508,7 @@ void decide(int dx, int dy) {
       if (!across && dy > 0) d = Drag::Move, target = ONE;
       break;
     case ALERT:
-      tracker.ack();
+      theme::ack();
       if (across)
         d = Drag::Slide;
       else
@@ -1548,7 +1519,7 @@ void decide(int dx, int dy) {
   pressed = -1;
   if (d == Drag::Move) {
     moveFrom = to;
-    if (to == ALERT) alertUntil = nowMs;
+    if (to == ALERT) alertUntil = host.now;
     go(target, true);
   }
 }
@@ -1561,198 +1532,170 @@ float carried(int dx, int dy) {
   }
 }
 
-}  // namespace
+// ---------- The theme ----------
 
-bool init(const uint8_t *cjk, size_t cjkLen) {
-  if (!gfx::init() || !text::init(cjk, cjkLen) || !board::init()) return false;
-  white = gfx::c565(WHITE), dim = gfx::c565(DIM), amber = gfx::c565(AMBER), green = gfx::c565(GREEN);
-  red = gfx::c565(RED), pink = gfx::c565(PINK), teal = gfx::c565(TEAL), smoke = gfx::c565(SMOKE);
-  for (int a = 0; a < sprites::COUNT; a++)
-    for (const sprites::Ink &k : sprites::ANIMALS[a].inks)
-      if (k.key) inks[a][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
-  for (int c = 0; c < sprites::COATS; c++) {
-    const sprites::Coat &coat = sprites::COAT[c];
-    for (const sprites::Ink &k : coat.inks)
-      if (k.key) inks[DRAGON + c][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
-    for (int f = 0; f < 4; f++) coatFire[c][f] = hex(coat.fire[f]);
-    accent[c] = gfx::c565(coatFire[c][1]);
+class Pets final : public theme::Theme {
+ public:
+  bool init() override {
+    if (!board::init()) return false;
+    white = gfx::c565(WHITE), dim = gfx::c565(DIM), amber = gfx::c565(AMBER), green = gfx::c565(GREEN);
+    red = gfx::c565(RED), pink = gfx::c565(PINK), teal = gfx::c565(TEAL), smoke = gfx::c565(SMOKE);
+    for (int a = 0; a < sprites::COUNT; a++)
+      for (const sprites::Ink &k : sprites::ANIMALS[a].inks)
+        if (k.key) inks[a][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
+    for (int c = 0; c < sprites::COATS; c++) {
+      const sprites::Coat &coat = sprites::COAT[c];
+      for (const sprites::Ink &k : coat.inks)
+        if (k.key) inks[DRAGON + c][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
+      for (int f = 0; f < 4; f++) coatFire[c][f] = hex(coat.fire[f]);
+      accent[c] = gfx::c565(coatFire[c][1]);
+    }
+    return true;
   }
-  return true;
-}
 
-void link(Link state) {
-  if (state != ONLINE) {
-    // Nothing on screen is current any more
-    haveSummary = false;
+  void reset() override {
     crowded = true;
-    tracker.clear();
     drag = Drag::None;
     pressed = -1;
     go(ONE);
   }
-  linkState = state;
-}
 
-bool summary(const char *json) {
-  static model::Summary next;
-  if (!model::parse(json, next)) return false;
-  // The daemon's clock, taken again only when it has moved: a summary read
-  // twice says the same time twice
-  if (next.ts != summaryTs) summaryAt = nowMs, summaryTs = next.ts;
-  if (!wallMs) wallMs = next.ts;
-  follow(next);
-  syncPets();
-  return true;
-}
+  void event(const events::Event &e, const model::Summary &) override { happened(e); }
 
-void touch(Touch kind, int x, int y, int64_t ms) {
-  lastTouch = ms;
-  int dx = x - downX, dy = y - downY;
-  switch (kind) {
-    case DOWN:
-      drag = Drag::Undecided;
-      downX = x, downY = y, downAt = ms;
-      sampleCount = 0;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      pressed = to == ALL ? petAt(x, y) : to == ONE ? onePetAt(x, y) : -1;
-      break;
-    case MOVE:
-      if (drag == Drag::None) break;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      if (drag == Drag::Undecided && dx * dx + dy * dy > 10 * 10) decide(dx, dy);
-      if (drag == Drag::Slide) {
-        int many = to == ALERT ? tracker.count : cur.count;
-        float x = dx / float(board::PITCH) * (many > 1 ? 1 : 0.25f);
-        slide.x = x < 1 - PAGE ? 1 - PAGE : x > PAGE - 1 ? PAGE - 1 : x;
-        slide.v = 0;
-        // The page the finger uncovers comes in beside
-        const char *k = many > 1 && slide.x ? nextPage(slide.x < 0 ? 1 : -1) : nullptr;
-        snprintf(besideKey, sizeof besideKey, "%s", k ? k : "");
-      } else if (drag == Drag::Move) {
-        float c = carried(dx, dy);
-        trans.x = c < 0 ? 0 : c > 1.05f ? 1.05f : c;
-        trans.v = 0;
-      }
-      break;
-    case UP: {
-      if (drag == Drag::None) break;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      float vx, vy;
-      velocity(vx, vy);
-      Drag was = drag;
-      drag = Drag::None;
-      pressed = -1;
-      if (was == Drag::Undecided) {
-        if (dx * dx + dy * dy < 14 * 14 && ms - downAt < 600) tap(x, y);
-      } else if (was == Drag::Slide) {
-        int many = to == ALERT ? tracker.count : cur.count;
-        bool next = many > 1 && (dx < -60 || vx < -500), prev = many > 1 && (dx > 60 || vx > 500);
-        if (next || prev) {
-          int dir = next ? 1 : -1;
-          if (const char *k = nextPage(dir)) {
-            char key[96];
-            snprintf(key, sizeof key, "%s", k);
-            // The new page carries on from beside the old, which goes on out
-            snprintf(besideKey, sizeof besideKey, "%s", to == ALERT ? alertKey : oneKey);
-            if (to == ALERT) {
-              snprintf(alertKey, sizeof alertKey, "%s", key);
-              alertAt = nowMs;
-            } else {
-              choose(key);
+  void summary() override {
+    if (calling[0]) callOut(calling), calling[0] = 0;
+    if (!tracker.count && to == ALERT) go(ONE);
+    syncPets();
+  }
+
+  void touch(Touch kind, int x, int y, int64_t ms) override {
+    lastTouch = ms;
+    int dx = x - finger.downX, dy = y - finger.downY;
+    switch (kind) {
+      case ui::DOWN:
+        drag = Drag::Undecided;
+        finger.down(x, y, ms);
+        pressed = to == ALL ? petAt(x, y) : to == ONE ? onePetAt(x, y) : -1;
+        break;
+      case ui::MOVE:
+        if (drag == Drag::None) break;
+        finger.move(x, y, ms);
+        if (drag == Drag::Undecided && finger.dragging()) decide(dx, dy);
+        if (drag == Drag::Slide) {
+          int many = to == ALERT ? tracker.count : cur.count;
+          float x = dx / float(board::PITCH) * (many > 1 ? 1 : 0.25f);
+          slide.x = x < 1 - PAGE ? 1 - PAGE : x > PAGE - 1 ? PAGE - 1 : x;
+          slide.v = 0;
+          // The page the finger uncovers comes in beside
+          const char *k = many > 1 && slide.x ? nextPage(slide.x < 0 ? 1 : -1) : nullptr;
+          snprintf(besideKey, sizeof besideKey, "%s", k ? k : "");
+        } else if (drag == Drag::Move) {
+          float c = carried(dx, dy);
+          trans.x = c < 0 ? 0 : c > 1.05f ? 1.05f : c;
+          trans.v = 0;
+        }
+        break;
+      case ui::UP: {
+        if (drag == Drag::None) break;
+        finger.up(x, y, ms);
+        float vx, vy;
+        finger.velocity(vx, vy);
+        Drag was = drag;
+        drag = Drag::None;
+        pressed = -1;
+        if (was == Drag::Undecided) {
+          if (finger.tapped(ms)) tap(x, y);
+        } else if (was == Drag::Slide) {
+          int many = to == ALERT ? tracker.count : cur.count;
+          bool next = many > 1 && (dx < -60 || vx < -500), prev = many > 1 && (dx > 60 || vx > 500);
+          if (next || prev) {
+            int dir = next ? 1 : -1;
+            if (const char *k = nextPage(dir)) {
+              char key[96];
+              snprintf(key, sizeof key, "%s", k);
+              // The new page carries on from beside the old, which goes on out
+              snprintf(besideKey, sizeof besideKey, "%s", to == ALERT ? alertKey : oneKey);
+              if (to == ALERT) {
+                snprintf(alertKey, sizeof alertKey, "%s", key);
+                alertAt = host.now;
+              } else {
+                choose(key);
+              }
+              slide.x += dir * PAGE;
             }
-            slide.x += dir * PAGE;
+          }
+          slide.v = vx / board::PITCH;
+        } else if (was == Drag::Move) {
+          float c = carried(dx, dy), speed = carried(int(vx), int(vy));
+          if (c > 0.35f || speed > 2.5f) {
+            driving = false;
+            trans.v = speed > 0 ? speed : 0;
+          } else {
+            go(moveFrom);  // not far enough: back it goes
+            trans.v = speed < 0 ? -speed : 0;
           }
         }
-        slide.v = vx / board::PITCH;
-      } else if (was == Drag::Move) {
-        float c = carried(dx, dy), speed = carried(int(vx), int(vy));
-        if (c > 0.35f || speed > 2.5f) {
-          driving = false;
-          trans.v = speed > 0 ? speed : 0;
-        } else {
-          go(moveFrom);  // not far enough: back it goes
-          trans.v = speed < 0 ? -speed : 0;
-        }
+        break;
       }
-      break;
     }
   }
-}
 
-// The dragon called to the pet ONE shows, whatever the count: from another
-// pet if it is about, or again to this one in a new coat; its entrance waits
-// for the alert like any
-void summon(int64_t ms) {
-  lastTouch = ms;
-  Pet *p = petOf(oneKey);
-  if (!p || p->leaving) return;
-  if (Pet *had = legendKey[0] ? petOf(legendKey) : nullptr) had->legend = false;
-  legendKey[0] = 0;
-  crown(oneKey);
-}
-
-// Once goes at once, so twice passes through ONE on its way to ALL
-void press(int64_t ms) {
-  static int64_t lastPress = -100000;
-  if (drag != Drag::None) return;  // a finger on the glass has it
-  lastTouch = ms;
-  tracker.ack();
-  if (ms - lastPress < TWICE_MS) {
-    lastPress = -100000;
-    go(ALL);
-    return;
+  // The dragon called to the pet ONE shows, whatever the count: from another
+  // pet if it is about, or again to this one in a new coat; its entrance waits
+  // for the alert like any
+  void summon(int64_t ms) override {
+    lastTouch = ms;
+    Pet *p = petOf(oneKey);
+    if (!p || p->leaving) return;
+    if (Pet *had = legendKey[0] ? petOf(legendKey) : nullptr) had->legend = false;
+    legendKey[0] = 0;
+    crown(oneKey);
   }
-  lastPress = ms;
-  // Whoever ONE leads with, the finger's pick let go
-  chosenKey[0] = 0;
-  alertUntil = ms;
-  go(ONE);
-}
 
-void frame(int64_t ms, int64_t wall) {
-  nowMs = ms;
-  float dt = lastMs ? (ms - lastMs) / 1000.f : 0;
-  if (dt > 0.1f) dt = 0.1f;
-  lastMs = ms;
-  if (wall) {
-    wallMs = wall;
-  } else {
-    // Kept by the summaries, and never turned back by one that was slower to
-    // arrive than the last: timers on screen only count up. A minute or more
-    // back is the clock itself being set.
-    int64_t w = summaryTs + (ms - summaryAt);
-    if (w > wallMs || wallMs - w > 60000) wallMs = w;
+  // Once goes at once, so twice passes through ONE on its way to ALL
+  void press(int times, int64_t ms) override {
+    lastTouch = ms;
+    if (times == 2) {
+      go(ALL);
+      return;
+    }
+    // Whoever ONE leads with, the finger's pick let go
+    chosenKey[0] = 0;
+    alertUntil = ms;
+    go(ONE);
   }
-  step(dt);
-  uint32_t t0 = gfx::ticks();
-  compose();
-  composeTicks += gfx::ticks() - t0;
-  frames++;
-}
 
-void draw(uint16_t *band, int y0, int y1) {
-  uint32_t t0 = gfx::ticks();
-  board::render(band, y0, y1);
-  renderTicks += gfx::ticks() - t0;
-}
+  void frame() override {
+    step(host.dt);
+    uint32_t t0 = gfx::ticks();
+    compose();
+    composeTicks += gfx::ticks() - t0;
+    frames++;
+  }
 
-int cue() {
-  if (cueHead == cueTail) return -1;
-  int c = cues[cueHead];
-  cueHead = (cueHead + 1) % 8;
-  return c;
-}
+  void draw(uint16_t *band, int y0, int y1) override {
+    uint32_t t0 = gfx::ticks();
+    board::render(band, y0, y1);
+    renderTicks += gfx::ticks() - t0;
+  }
 
-const char *screen() {
-  static const char *const NAMES[] = {"one", "all", "alert"};
-  return NAMES[to];
-}
+  const char *screen() const override {
+    static const char *const NAMES[] = {"one", "all", "alert"};
+    return NAMES[to];
+  }
 
-void timings(char *out, size_t len) {
-  float k = frames ? 1 / (gfx::ticksPerMs() * frames) : 0;
-  snprintf(out, len, "compose %.2f render %.2f", composeTicks * k, renderTicks.exchange(0) * k);
-  composeTicks = 0;
-  frames = 0;
-}
+  void timings(char *out, size_t len) override {
+    float k = frames ? 1 / (gfx::ticksPerMs() * frames) : 0;
+    snprintf(out, len, "compose %.2f render %.2f", composeTicks * k, renderTicks.exchange(0) * k);
+    composeTicks = 0;
+    frames = 0;
+  }
+};
 
-}  // namespace ui
+}  // namespace
+}  // namespace pets
+
+theme::Theme &theme::instance() {
+  static pets::Pets pets;
+  return pets;
+}

@@ -29,11 +29,13 @@ EMSCRIPTEN_KEEPALIVE void am_press(double ms) { ui::press(int64_t(ms)); }
 
 EMSCRIPTEN_KEEPALIVE void am_summon(double ms) { ui::summon(int64_t(ms)); }
 
-// Draws a frame and returns it as RGBA, with everything outside the round panel transparent
-EMSCRIPTEN_KEEPALIVE uint8_t *am_frame(double ms, double wall) {
+// Draws a frame and returns it as RGBA, with everything outside the round
+// panel transparent: all at once, or `rows` rows at a time as a board does
+EMSCRIPTEN_KEEPALIVE uint8_t *am_frame(double ms, double wall, int rows) {
   double t0 = emscripten_get_now();
   ui::frame(int64_t(ms), int64_t(wall));
-  ui::draw(fb, 0, gfx::H);
+  if (rows <= 0) rows = gfx::H;
+  for (int y = 0; y < gfx::H; y += rows) ui::draw(fb + y * gfx::W, y, y + rows < gfx::H ? y + rows : gfx::H);
   drawMs = emscripten_get_now() - t0;
   for (int y = 0; y < gfx::H; y++) {
     float dy = y + 0.5f - gfx::CY;

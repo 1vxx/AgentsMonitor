@@ -1,8 +1,9 @@
 // AgentsMonitor's display, for the Waveshare ESP32-S3-Touch-AMOLED-1.75C.
 //
-// The screens are a display program from devices/apps on devices/core, the
-// same code the review page runs (build.sh copies them into src/). Core 1 reads touch and the side buttons, feeds the UI summaries and works
-// out each frame; then both cores draw it a band of rows at a time in
+// The screens are a theme from devices/themes on devices/core, the same code
+// the review page runs (build.sh copies them into src/). Core 1 reads touch
+// and the side buttons, feeds the UI summaries and works out each frame;
+// then both cores draw it a band of rows at a time in
 // internal RAM, and each band goes to the panel by DMA while more are drawn.
 // Core 0 also fetches summaries over Wi-Fi and plays chimes.
 

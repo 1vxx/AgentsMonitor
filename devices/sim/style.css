@@ -25,7 +25,18 @@ body {
 }
 
 header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 28px;
   padding: 20px 28px 4px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 h1 {
@@ -109,6 +120,13 @@ canvas {
 
 canvas.pixelated {
   image-rendering: pixelated;
+}
+
+.about {
+  max-width: 480px;
+  margin: 0;
+  color: var(--text-2);
+  text-align: center;
 }
 
 .readout {

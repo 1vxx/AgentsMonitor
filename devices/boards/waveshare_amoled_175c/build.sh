@@ -1,12 +1,13 @@
 #!/bin/sh
 # Builds the firmware for this board; with --upload, also flashes it.
-# APP picks the display program from devices/apps (halo by default).
+# THEME picks the theme from devices/themes (halo by default); one theme goes
+# into each image. PORT is the board's serial port.
 # Needs arduino-cli with the esp32 core and SensorLib, and secrets.h (copy
 # secrets.example.h).
 set -e
 cd "$(dirname "$0")"
 DEVICES=../..
-APP="${APP:-halo}"
+THEME="${THEME:-${APP:-halo}}"
 FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi,FlashSize=32M,PartitionScheme=app5M_fat24M_32MB,FlashMode=qio"
 PORT="${PORT:-/dev/cu.usbmodem1101}"
 
@@ -14,16 +15,17 @@ if [ ! -f secrets.h ]; then
   echo "Copy secrets.example.h to secrets.h and fill it in" >&2
   exit 1
 fi
-if [ ! -d "$DEVICES/apps/$APP" ]; then
-  echo "No display program $DEVICES/apps/$APP" >&2
+if [ ! -d "$DEVICES/themes/$THEME" ]; then
+  echo "No theme $THEME; there are: $(for d in "$DEVICES"/themes/*/; do basename "$d"; done | tr '\n' ' ')" >&2
   exit 1
 fi
 
-# The shared core, the display program and the hanzi font go in the sketch's
-# src/, which Arduino builds; side by side, so they include each other by name
+# The shared core, the theme and the hanzi font go in the sketch's src/,
+# which Arduino builds; side by side, so they include each other by name
 rm -rf src
 mkdir -p src/ui
-cp "$DEVICES"/core/*.cpp "$DEVICES"/core/*.h "$DEVICES/apps/$APP"/*.cpp "$DEVICES/apps/$APP"/*.h src/ui/
+cp "$DEVICES"/core/*.cpp "$DEVICES"/core/*.h src/ui/
+find "$DEVICES/themes/$THEME" -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \) -exec cp {} src/ui/ \;
 python3 -I "$DEVICES/tools/embed.py" "$DEVICES/fonts/cjk10.bin" src/cjk10.h CJK10
 
 # Arduino's bundled ctags is an Intel binary; the sketch declares everything

@@ -1,0 +1,8 @@
+{
+  "name": { "en": "Pets", "zh": "像素宠物" },
+  "about": {
+    "en": "Each session a pixel animal on an LED dot board, acting out what it is doing.",
+    "zh": "每个会话是 LED 点阵上的一只像素小动物，用动作表演它正在做的事。"
+  },
+  "author": "1v"
+}

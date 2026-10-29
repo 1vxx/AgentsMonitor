@@ -134,7 +134,6 @@ Latin latin[sizeof ART / sizeof *ART];
 constexpr int SPACE = 3;  // columns a space takes
 
 // The hanzi font, cjk10.bin (see devices/fonts/make_cjk.py)
-const uint8_t *cjk;
 int cjkCount;
 const uint8_t *cjkCodes, *cjkOffsets, *cjkData;
 
@@ -452,9 +451,8 @@ bool init(const uint8_t *data, size_t len) {
     g.width = digit ? 5 : uint8_t(right - left + 1);
     if (g.cp < 128) ascii[g.cp] = &g;
   }
-  cjk = nullptr, cjkCount = 0;
+  cjkCount = 0;
   if (data && len > 8 && !memcmp(data, "PXF1", 4)) {
-    cjk = data;
     cjkCount = data[4] | data[5] << 8;
     cjkCodes = data + 8;
     cjkOffsets = cjkCodes + cjkCount * 4;

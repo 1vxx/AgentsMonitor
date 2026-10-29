@@ -1,18 +1,52 @@
-// The review page: runs a display program (build/ui.js, see build.sh) on a canvas,
+// The review page: runs a theme (build/<theme>.js, see build.sh) on a canvas,
 // turns the mouse into touches, plays its chimes, and feeds it summaries from
 // a scripted world or from the daemon itself.
 
-import createUi from './build/ui.js'
+import { apply, lang, pick, setLang, t } from './i18n.js'
 import { SCENARIOS } from './scenarios.js'
 import { World } from './world.js'
 
 const SIZE = 466
 const LINK = { connecting: 0, online: 1, lost: 2 }
-const CUE_NAMES = ['等你', '轻提醒', '完成', '出错', '传说']
 const $ = id => document.getElementById(id)
 
-// ---------- The module ----------
+const saved = key => {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const save = (key, value) => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {}
+}
 
+apply()
+$('readout').textContent = t('loading')
+
+// ---------- The theme ----------
+
+// Every build holds one theme, so another one is another module: the page
+// loads the one asked for (?theme=, else the last one shown), and switching
+// reloads the page with it
+const THEMES = await fetch('build/themes.json').then(r => r.json())
+const asked = new URLSearchParams(location.search).get('theme') || saved('am.theme')
+const theme = THEMES.find(x => x.id === asked) ?? THEMES[0]
+save('am.theme', theme.id)
+for (const x of THEMES) $('theme').append(new Option(pick(x.name), x.id, false, x === theme))
+$('theme').onchange = e => {
+  const url = new URL(location.href)
+  url.searchParams.set('theme', e.target.value)
+  location.href = url.href
+}
+const describeTheme = () => {
+  for (const o of $('theme').options) o.textContent = pick(THEMES.find(x => x.id === o.value).name)
+  $('theme-about').textContent = `${pick(theme.about)} ${t('by', { author: theme.author })}`
+}
+
+const createUi = (await import(`./build/${theme.id}.js`)).default
 const mod = await createUi()
 const encoder = new TextEncoder()
 
@@ -38,7 +72,7 @@ const ui = {
   touch: (kind, x, y, ms) => mod._am_touch(kind, x, y, ms),
   press: ms => mod._am_press(ms),
   summon: ms => mod._am_summon(ms),
-  frame: (ms, wall) => mod._am_frame(ms, wall),
+  frame: (ms, wall) => mod._am_frame(ms, wall, 0),
   cue: () => mod._am_cue(),
   screen: () => {
     const p = mod._am_screen()
@@ -66,6 +100,8 @@ const play = cue => {
   src.start()
 }
 
+const cueName = c => t(`cue.${c}`)
+
 const log = text => {
   const li = document.createElement('li')
   li.textContent = `${new Date().toLocaleTimeString()}  ${text}`
@@ -77,14 +113,14 @@ $('sound').onclick = () => {
   if (audio) {
     audio.close()
     audio = null
-    $('sound').textContent = '启用声音'
+    $('sound').textContent = t('sound.on')
     return
   }
   audio = new AudioContext()
   gain = audio.createGain()
   gain.gain.value = +$('volume').value
   gain.connect(audio.destination)
-  $('sound').textContent = '关闭声音'
+  $('sound').textContent = t('sound.off')
 }
 $('volume').oninput = () => gain && (gain.gain.value = +$('volume').value)
 document.querySelectorAll('[data-cue]').forEach(b => (b.onclick = () => play(+b.dataset.cue)))
@@ -134,10 +170,14 @@ const pushWorld = () => {
   }
 }
 
-for (const s of SCENARIOS) $('scenario').append(new Option(s.name, s.id))
+for (const s of SCENARIOS) $('scenario').append(new Option(pick(s.name), s.id))
+const describeScenario = () => {
+  for (const o of $('scenario').options) o.textContent = pick(SCENARIOS.find(s => s.id === o.value).name)
+  $('scenario-note').textContent = pick(scenario.note)
+}
 const pickScenario = id => {
   scenario = SCENARIOS.find(s => s.id === id)
-  $('scenario-note').textContent = scenario.note
+  describeScenario()
   resetScript()
 }
 $('scenario').onchange = e => pickScenario(e.target.value)
@@ -145,7 +185,7 @@ pickScenario(scenario.id)
 
 $('play').onclick = () => {
   playing = !playing
-  $('play').textContent = playing ? '暂停' : '继续'
+  $('play').textContent = t(playing ? 'pause' : 'resume')
 }
 $('restart').onclick = () => resetScript()
 
@@ -155,18 +195,6 @@ let retry = null
 
 // The address and token are kept in this browser between visits. A browser
 // WebSocket can't send an Authorization header, so the token rides in the URL.
-const saved = key => {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-const save = (key, value) => {
-  try {
-    localStorage.setItem(key, value)
-  } catch {}
-}
 $('ws-url').value = saved('am.ws-url') || $('ws-url').value
 $('ws-token').value = saved('am.ws-token') || ''
 
@@ -183,6 +211,13 @@ const liveUrl = () => {
   }
 }
 
+// What the link is doing, kept as a key so it can be said again in another language
+let wsKey = 'ws.idle'
+const wsSay = key => {
+  wsKey = key
+  $('ws-state').textContent = t(key)
+}
+
 const connectLive = () => {
   clearTimeout(retry)
   ws?.close()
@@ -191,15 +226,15 @@ const connectLive = () => {
   if (!url) {
     ws = null
     ui.link('lost')
-    $('ws-state').textContent = '地址不对，应形如 ws://127.0.0.1:7788/v1/ws'
+    wsSay('ws.bad')
     return
   }
-  $('ws-state').textContent = '连接中…'
+  wsSay('ws.connecting')
   const sock = new WebSocket(url)
   ws = sock
   sock.onopen = () => {
     ui.link('online')
-    $('ws-state').textContent = '已连接'
+    wsSay('ws.open')
   }
   sock.onmessage = e => {
     const m = JSON.parse(e.data)
@@ -211,7 +246,7 @@ const connectLive = () => {
   sock.onclose = () => {
     if (ws !== sock) return
     ui.link('lost')
-    $('ws-state').textContent = '已断开，3 秒后重连'
+    wsSay('ws.closed')
     if (source === 'live') retry = setTimeout(connectLive, 3000)
   }
 }
@@ -242,20 +277,20 @@ $('ws-connect').onclick = connectLive
 
 const TITLES = ['Investigate UI stutter', 'Daemon DB growth and event retention', 'Theme switch polish', 'Live session ordering', 'Device UI prototype', 'Translate README to Chinese', 'Count quotas from logs', 'Codex plugin icon']
 const COMMANDS = ['pnpm --dir web build', 'cargo test -p agentsmon', 'git push origin main', 'rm -rf node_modules && pnpm i', 'curl -s localhost:7788/v1/summary']
-const pick = list => list[Math.floor(Math.random() * list.length)]
+const anyOf = list => list[Math.floor(Math.random() * list.length)]
 let made = 0
 
 const newSession = () => {
   const key = `claude-code:m${++made}`
-  world.start(now(), key, { project: 'AgentsMonitor', title: pick(TITLES) })
-  world.tool(now(), key, pick(['Read', 'Edit', 'Bash', 'Grep']))
+  world.start(now(), key, { project: 'AgentsMonitor', title: anyOf(TITLES) })
+  world.tool(now(), key, anyOf(['Read', 'Edit', 'Bash', 'Grep']))
   return key
 }
 const working = () => world.list.filter(s => ['thinking', 'tool', 'compacting'].includes(s.status) && !s.stale)
-const anyWorking = () => pick(working())?.key ?? newSession()
+const anyWorking = () => anyOf(working())?.key ?? newSession()
 
 const EVENTS = {
-  permission: () => world.ask(now(), newSession(), { tool: 'Bash', subject: pick(COMMANDS) }),
+  permission: () => world.ask(now(), newSession(), { tool: 'Bash', subject: anyOf(COMMANDS) }),
   input: () => world.ask(now(), anyWorking(), { kind: 'input', tool: 'AskUserQuestion', message: 'Fix the failing tests first, or commit what is there?' }),
   answer: () => world.list.forEach(s => world.answer(now(), s.key)),
   done: () => world.finish(now(), anyWorking(), 'answer'),
@@ -263,11 +298,11 @@ const EVENTS = {
   error: () => world.finish(now(), anyWorking(), 'error'),
   start: () => newSession(),
   stale: () => {
-    const s = pick(world.list.filter(x => !x.stale))
+    const s = anyOf(world.list.filter(x => !x.stale))
     if (s) world.setStale(now(), s.key, true)
   },
   end: () => {
-    const s = pick(world.list)
+    const s = anyOf(world.list)
     if (s) world.end(s.key)
   },
   link: () => (world.link = world.link === 'online' ? 'lost' : 'online'),
@@ -315,21 +350,14 @@ const applyZoom = () => {
 $('zoom').onchange = applyZoom
 applyZoom()
 
-const STATUS = {
-  thinking: '思考中',
-  tool: '执行',
-  compacting: '压缩上下文',
-  waiting_input: '等待回答',
-  waiting_permission: '等待授权',
-  idle: '空闲',
-}
+const escape = text => String(text).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`)
 const showSessions = list => {
   const rows = list.map(s => {
-    const state = s.stale ? '无信号' : `${STATUS[s.status] ?? s.status}${s.status === 'tool' && s.tool ? ` ${s.tool}` : ''}`
+    const state = s.stale ? t('status.stale') : `${t(`status.${s.status}`)}${s.status === 'tool' && s.tool ? ` ${s.tool}` : ''}`
     const end = s.status === 'idle' && s.last_turn ? ` · ${s.last_turn.outcome}` : ''
-    return `<tr><td>${s.title || s.project}</td><td class="state">${state}${end}</td></tr>`
+    return `<tr><td>${escape(s.title || s.project)}</td><td class="state">${escape(state + end)}</td></tr>`
   })
-  $('sessions').innerHTML = rows.join('') || '<tr><td class="state">没有会话</td></tr>'
+  $('sessions').innerHTML = rows.join('') || `<tr><td class="state">${t('status.none')}</td></tr>`
 }
 
 // ---------- The loop ----------
@@ -343,30 +371,30 @@ let statAt = performance.now()
 let skew = 0
 
 const tick = forced => {
-  const t = performance.now() + skew
-  if (!forced && t - lastFrame < 1000 / +$('fps').value - 2) return
-  lastFrame = t
-  const dt = Math.min(1, (t - lastTick) / 1000)
-  lastTick = t
+  const at = performance.now() + skew
+  if (!forced && at - lastFrame < 1000 / +$('fps').value - 2) return
+  lastFrame = at
+  const dt = Math.min(1, (at - lastTick) / 1000)
+  lastTick = at
 
   if (source === 'script') advanceScript(dt)
   const wall = source === 'script' ? now() : Date.now()
-  const ptr = ui.frame(t, wall)
+  const ptr = ui.frame(at, wall)
   ctx.putImageData(new ImageData(new Uint8ClampedArray(mod.HEAPU8.buffer, ptr, SIZE * SIZE * 4).slice(), SIZE, SIZE), 0, 0)
   drawMs += mod._am_draw_ms()
   frames++
 
   for (let c; (c = ui.cue()) >= 0; ) {
-    log(`提示音：${CUE_NAMES[c]}${audio ? '' : '（声音未启用）'}`)
+    log(t('log.cue', { name: cueName(c) }) + (audio ? '' : t('log.muted')))
     play(c)
   }
 
-  if (t - statAt > 500) {
-    const fps = (frames * 1000) / (t - statAt)
-    $('readout').textContent = `屏幕 ${ui.screen()} · ${fps.toFixed(0)} fps · 绘制 ${(drawMs / frames).toFixed(1)} ms（浏览器）`
+  if (at - statAt > 500) {
+    const fps = (frames * 1000) / (at - statAt)
+    $('readout').textContent = t('readout', { screen: ui.screen(), fps: fps.toFixed(0), ms: (drawMs / frames).toFixed(1) })
     frames = 0
     drawMs = 0
-    statAt = t
+    statAt = at
     if (source === 'script') {
       const m = Math.floor(virtual / 60)
       const s = Math.floor(virtual % 60)
@@ -377,6 +405,27 @@ const tick = forced => {
     }
   }
 }
+
+// ---------- Language ----------
+
+// The words that say how things stand are set here, not by data-i18n, so a
+// change of language keeps what they say
+const showLang = () => {
+  document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('on', b.dataset.lang === lang))
+  describeTheme()
+  describeScenario()
+  $('play').textContent = t(playing ? 'pause' : 'resume')
+  $('sound').textContent = t(audio ? 'sound.off' : 'sound.on')
+  $('ws-state').textContent = t(wsKey)
+}
+document.querySelectorAll('#lang button').forEach(
+  b =>
+    (b.onclick = () => {
+      setLang(b.dataset.lang)
+      showLang()
+    }),
+)
+showLang()
 
 const loop = () => {
   requestAnimationFrame(loop)

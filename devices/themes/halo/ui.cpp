@@ -18,8 +18,6 @@
 // the orb green or red for a moment. A wait nobody answers chimes again at 2
 // and 5 minutes, then every 10, until a tap.
 
-#include "ui.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,14 +25,16 @@
 #include <atomic>
 
 #include "events.h"
+#include "gesture.h"
 #include "gfx.h"
 #include "halo.h"
 #include "model.h"
 #include "spring.h"
 #include "synth.h"
 #include "text.h"
+#include "theme.h"
 
-namespace ui {
+namespace halo {
 namespace {
 
 using gfx::RGB;
@@ -47,6 +47,10 @@ using model::Wait;
 using text::LABEL;
 using text::MONO;
 using text::PROP;
+using ui::CONNECTING;
+using ui::Link;
+using ui::ONLINE;
+using ui::Touch;
 
 // ---------- Look ----------
 
@@ -67,7 +71,6 @@ constexpr int64_t ROTATE_MS = 4000;         // between waiting sessions on the c
 constexpr int64_t FOCUS_MS = 10000;         // a chosen session stays under the orb
 constexpr int64_t AWAY_MS = 30000;          // list and detail fall back home
 constexpr int64_t SHIFT_MS = 3 * 60000;     // anti burn-in nudge
-constexpr int64_t TWICE_MS = 450;           // the side button pressed again this soon: twice
 constexpr float CHEER_S = 2.6f;             // the orb's celebration of a finished turn
 constexpr float WINCE_S = 2.2f;             // and its wince at a failed one
 constexpr float MOVE_PX = 220;              // a finger this far carries a move all the way
@@ -82,10 +85,9 @@ const char *const PART_NAMES[PARTS] = {"back", "sky", "rim", "glow", "orb", "hom
 std::atomic<uint32_t> partTicks[PARTS];
 uint32_t recTicks, partFrames;
 
-model::Summary cur;
-bool haveSummary;
-Link linkState = CONNECTING;
-int64_t summaryAt, summaryTs;  // our clock and the daemon's when the last one came
+// The summary, the link and the clocks, kept by the host
+const theme::State &host = theme::state();
+const model::Summary &cur = host.summary;
 
 enum Screen { HOME, ALERT, LIST, DETAIL };
 Screen from = HOME, to = HOME, backTo = HOME;
@@ -120,30 +122,21 @@ struct Sat {
 };
 Sat sats[model::MAX];
 
-events::Tracker tracker;
-events::Wait *const waits = tracker.waits;
-int &waitCount = tracker.count;
+const events::Wait *const waits = host.waits.waits;
+const int &waitCount = host.waits.count;
 int64_t alertUntil, alertAt;
-
-int cues[8], cueHead, cueTail;
 
 halo::Palette pal = halo::palette(Mood::Offline);
 halo::Motion motion;
 float spinSpeed, pulsePhase, pulseK, breatheK, rippleK, glowK = 0.5f;
-int64_t lastMs, nowMs, wallMs, cheerAt = -100000, winceAt = -100000;
+int64_t cheerAt = -100000, winceAt = -100000;
 
 // Touch
 enum class Drag { None, Undecided, Caption, Move, Scroll };
 Drag drag = Drag::None;
-int downX, downY, lastX, lastY;
-int64_t downAt;
+gesture::Finger finger;
 float scrollAtDown;
 Screen moveFrom;
-struct Sample {
-  int x, y;
-  int64_t ms;
-} samples[6];
-int sampleCount;
 int64_t pressAt = -100000, releaseAt = -100000;
 float pressX, pressY;
 bool pressTapped;
@@ -160,16 +153,9 @@ inline float smooth(float v) { return v * v * (3 - 2 * v); }
 inline float easeOut(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
 inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-void pushCue(synth::Cue c) {
-  int next = (cueTail + 1) % 8;
-  if (next == cueHead) return;
-  cues[cueTail] = c;
-  cueTail = next;
-}
-
 void choose(const char *key) {
   snprintf(focusKey, sizeof focusKey, "%s", key);
-  focusAt = nowMs;
+  focusAt = host.now;
 }
 
 int indexOf(const char *key) {
@@ -186,7 +172,7 @@ Tone tone(const Session &s) {
   if (model::waiting(s.status)) return ATTN;
   if (model::working(s.status)) return ACTIVE;
   if (s.outcome == Outcome::Error || s.outcome == Outcome::Refusal) return CRITICAL;
-  if (s.outcome == Outcome::Answer && wallMs - s.endedAt < GOOD_FOR_MS) return GOOD;
+  if (s.outcome == Outcome::Answer && host.wall - s.endedAt < GOOD_FOR_MS) return GOOD;
   return REST;
 }
 
@@ -204,7 +190,7 @@ halo::Palette tonePalette(Tone t) {
 // The colour a line of state is written in
 RGB toneText(Tone t) { return t == REST || t == MUTED ? TEXT_3 : TONE_COLORS[t]; }
 
-Mood mood() { return linkState == ONLINE && haveSummary ? cur.mood : Mood::Offline; }
+Mood mood() { return host.link == ONLINE && host.have ? cur.mood : Mood::Offline; }
 
 const char *titleOf(const Session &s) { return s.title[0] ? s.title : s.project; }
 
@@ -252,13 +238,13 @@ void age(int64_t ms, char *out, size_t n, bool suffix) {
 int stateLines(const Session &s, char (*out)[96]) {
   char t[32], tool[64];
   if (s.stale) {
-    age(wallMs - s.since, t, sizeof t, false);
+    age(host.wall - s.since, t, sizeof t, false);
     snprintf(out[0], 96, "NO SIGNAL · %s", t);
     return 1;
   }
   switch (s.status) {
     case Status::WaitingPermission:
-      duration(wallMs - waitSince(s), t, sizeof t);
+      duration(host.wall - waitSince(s), t, sizeof t);
       toolName(s.waitTool[0] ? s.waitTool : s.tool, tool, sizeof tool);
       if (tool[0]) {
         snprintf(out[0], 96, "NEEDS APPROVAL · %s · %s", tool, t);
@@ -270,7 +256,7 @@ int stateLines(const Session &s, char (*out)[96]) {
       snprintf(out[1], 96, "NEEDS APPROVAL");
       return 2;
     case Status::WaitingInput:
-      duration(wallMs - waitSince(s), t, sizeof t);
+      duration(host.wall - waitSince(s), t, sizeof t);
       snprintf(out[0], 96, "NEEDS AN ANSWER · %s", t);
       snprintf(out[1], 96, "NEEDS AN ANSWER");
       return 2;
@@ -287,7 +273,7 @@ int stateLines(const Session &s, char (*out)[96]) {
     case Status::Compacting: snprintf(out[0], 96, "COMPACTING"); return 1;
     default: break;
   }
-  age(wallMs - (s.endedAt ? s.endedAt : s.since), t, sizeof t, true);
+  age(host.wall - (s.endedAt ? s.endedAt : s.since), t, sizeof t, true);
   switch (s.outcome) {
     case Outcome::Error:
       snprintf(out[0], 96, "LAST TURN FAILED · %s", t);
@@ -330,7 +316,7 @@ const Session *focused() {
 // The anti burn-in nudge: a few pixels, moved every few minutes
 void shift(float &dx, float &dy) {
   static const int8_t STEPS[][2] = {{0, 0}, {1, 1}, {-1, 2}, {2, -1}, {-2, 0}, {0, -2}, {1, -1}, {-1, 1}};
-  int k = int(nowMs / SHIFT_MS % 8);
+  int k = int(host.now / SHIFT_MS % 8);
   dx = STEPS[k][0], dy = STEPS[k][1];
 }
 
@@ -351,7 +337,7 @@ void title(const char *s, int scale, float cx, float bandX, int y, int maxW, uin
   }
   // Rest two seconds at the start, then scroll at 36 px/s with a gap between copies
   int loop = w + 24 * scale;
-  float t = (nowMs - since) / 1000.f - 2;
+  float t = (host.now - since) / 1000.f - 2;
   float off = t <= 0 ? 0 : fmodf(t * 36, float(loop));
   float start = cx - maxW / 2.f;
   text::draw(PROP, scale, s, start - off, y, color, alpha, x0, x1, 20);
@@ -419,39 +405,30 @@ Anchor anchor(Screen s) {
 
 // ---------- Following the summaries ----------
 
-void follow(const model::Summary &next) {
-  events::Event evs[2 * model::MAX];
-  int n = tracker.follow(haveSummary ? &cur : nullptr, next, evs, 2 * model::MAX);
-  for (int k = 0; k < n; k++) {
-    const events::Event &e = evs[k];
-    if (e.kind == events::WAIT) {
-      pushCue(synth::ATTENTION);
-      alertUntil = nowMs + TAKEOVER_MS;
-      alertAt = nowMs;
-      choose(e.key);
-      drag = Drag::None;
-      go(ALERT);
-    } else if (e.kind == events::END) {
-      bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
-      if (e.outcome == Outcome::Answer || failed) pushCue(failed ? synth::ERROR : synth::DONE);
-      for (Sat &sat : sats)
-        if (sat.used && !strcmp(sat.key, e.key)) {
-          sat.flashAt = nowMs;
-          sat.flashColor = TONE_COLORS[failed ? CRITICAL : GOOD];
-        }
-      if (e.outcome == Outcome::Answer || failed) {
-        (failed ? winceAt : cheerAt) = nowMs;
-        // Show which one finished, unless someone is waiting for you
-        bool anyWait = false;
-        for (int i = 0; i < next.count; i++) anyWait |= isWaiting(next.sessions[i]);
-        if (!anyWait) choose(e.key);
+// A session starts waiting: its card takes over. A turn ends: the orb cheers
+// or winces, and its satellite flashes.
+void happened(const events::Event &e, const model::Summary &next) {
+  if (e.kind == events::WAIT) {
+    alertUntil = host.now + TAKEOVER_MS;
+    alertAt = host.now;
+    choose(e.key);
+    drag = Drag::None;
+    go(ALERT);
+  } else if (e.kind == events::END) {
+    bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
+    for (Sat &sat : sats)
+      if (sat.used && !strcmp(sat.key, e.key)) {
+        sat.flashAt = host.now;
+        sat.flashColor = TONE_COLORS[failed ? CRITICAL : GOOD];
       }
+    if (e.outcome == Outcome::Answer || failed) {
+      (failed ? winceAt : cheerAt) = host.now;
+      // Show which one finished, unless someone is waiting for you
+      bool anyWait = false;
+      for (int i = 0; i < next.count; i++) anyWait |= isWaiting(next.sessions[i]);
+      if (!anyWait) choose(e.key);
     }
   }
-  cur = next;
-  haveSummary = true;
-  tracker.prune(cur);
-  if (!waitCount && to == ALERT) go(HOME);
 }
 
 // Satellites keep their place across summaries, matched by key
@@ -496,7 +473,7 @@ void step(float dt) {
   spinSpeed += ((m == Mood::Working ? 1 / 14.f : 0) - spinSpeed) * gfx::clamp01(dt * 1.6f);
   motion.spin += spinSpeed * dt;
   // A finished turn gives the blobs a swirl that dies away
-  float c = (nowMs - cheerAt) / 1000.f;
+  float c = (host.now - cheerAt) / 1000.f;
   if (c >= 0 && c < CHEER_S) {
     motion.spin += 0.9f * expf(-c * 2.2f) * dt;
     for (int b = 0; b < 3; b++) motion.phase[b] += 0.6f * expf(-c * 2.2f) * dt;
@@ -526,11 +503,10 @@ void step(float dt) {
 
   // Reminders for waits nobody has answered
   events::Event due[model::MAX];
-  for (int k = 0, n = tracker.remind(wallMs, due, model::MAX); k < n; k++) {
-    pushCue(synth::REMIND);
+  for (int k = 0, n = theme::reminders(due, model::MAX); k < n; k++) {
     for (Sat &sat : sats)
       if (sat.used && !strcmp(sat.key, due[k].key)) {
-        sat.flashAt = nowMs;
+        sat.flashAt = host.now;
         sat.flashColor = TONE_COLORS[ATTN];
       }
   }
@@ -549,7 +525,7 @@ void step(float dt) {
     snprintf(cap.prevKey, sizeof cap.prevKey, "%s", cap.key);
     snprintf(cap.key, sizeof cap.key, "%s", key);
     cap.fade.x = 0, cap.fade.v = 0;
-    cap.since = nowMs;
+    cap.since = host.now;
     cap.line[0] = 0;
   }
   cap.fade.step(1, dt, 120, 22);
@@ -570,9 +546,9 @@ void step(float dt) {
   }
 
   // Timeouts
-  if (to == ALERT && nowMs >= alertUntil) go(HOME);
-  if ((to == LIST || to == DETAIL) && drag == Drag::None && nowMs - lastTouch > AWAY_MS) go(HOME);
-  if (to == HOME && focusKey[0] && nowMs - focusAt > FOCUS_MS && nowMs - lastTouch > FOCUS_MS) focusKey[0] = 0;
+  if (to == ALERT && host.now >= alertUntil) go(HOME);
+  if ((to == LIST || to == DETAIL) && drag == Drag::None && host.now - lastTouch > AWAY_MS) go(HOME);
+  if (to == HOME && focusKey[0] && host.now - focusAt > FOCUS_MS && host.now - lastTouch > FOCUS_MS) focusKey[0] = 0;
 }
 
 // ---------- Home ----------
@@ -580,12 +556,12 @@ void step(float dt) {
 float pulsed(float r) {
   float p = fmodf(pulsePhase, 1);
   float pulse = p < 0.5f ? 0.95f + 0.08f * (0.5f - 0.5f * cosf(p * gfx::TAU)) : 1.03f - 0.08f * (0.5f - 0.5f * cosf((p - 0.5f) * gfx::TAU));
-  float breathe = 0.985f + 0.015f * sinf(nowMs / 1000.f * gfx::TAU / 6);
+  float breathe = 0.985f + 0.015f * sinf(host.now / 1000.f * gfx::TAU / 6);
   return r * (1 + (pulse - 1) * pulseK) * (1 + (breathe - 1) * breatheK);
 }
 
 void drawSatellites(float r, float a) {
-  float t = nowMs / 1000.f;
+  float t = host.now / 1000.f;
   for (Sat &sat : sats)
     if (sat.used && sat.tail > 0.01f) halo::tail(r, sat.turn, 34 / 360.f, gfx::c565(sat.color), 0.55f * sat.tail * a);
   for (Sat &sat : sats) {
@@ -598,7 +574,7 @@ void drawSatellites(float r, float a) {
       float e = easeOut(fmodf(t, 1.8f) / 1.8f), k = 1 + 2.4f * e;
       gfx::ringAt(x, y, 8 * k, 1.8f * k, c, 0.8f * (1 - e) * sat.ping * a);
     }
-    float since = (nowMs - sat.flashAt) / 1000.f;
+    float since = (host.now - sat.flashAt) / 1000.f;
     if (since < 1.2f) {
       float e = easeOut(since / 1.2f);
       gfx::ringAt(x, y, 10 + 30 * e, 4 - 2 * e, gfx::c565(sat.flashColor), 0.9f * (1 - e) * a);
@@ -665,11 +641,11 @@ void captionOf(const Session &s, float cx, float dy, float a, bool current, int6
     if (cap.line[0]) {
       snprintf(cap.was, sizeof cap.was, "%s", cap.line);
       cap.rolls = text::digitsOnly(line, cap.was);
-      cap.changed = nowMs;
+      cap.changed = host.now;
     }
     snprintf(cap.line, sizeof cap.line, "%s", line);
   }
-  float t = (nowMs - cap.changed) / (cap.rolls ? 260.f : 320.f);
+  float t = (host.now - cap.changed) / (cap.rolls ? 260.f : 320.f);
   if (t >= 1) {
     text::centre(LABEL, 3, line, cx, y2, color, a);
   } else if (cap.rolls) {
@@ -682,11 +658,11 @@ void captionOf(const Session &s, float cx, float dy, float a, bool current, int6
 }
 
 void homeBack(const halo::Palette &p, float ox, float oy, float R, float a, float cheer, float wince) {
-  halo::scale(nowMs / 1000.f / 140, gfx::mix(TEXT, p.m1, 0.8f), a, nowMs / 1000.f / 9);
+  halo::scale(host.now / 1000.f / 140, gfx::mix(TEXT, p.m1, 0.8f), a, host.now / 1000.f / 9);
   gfx::ring(halo::R_TRACK, 1.5f, gfx::c565(gfx::mix(BORDER_2, p.m1, 0.45f)), a);
-  if (linkState == ONLINE) drawSatellites(halo::R_TRACK, a);
+  if (host.link == ONLINE) drawSatellites(halo::R_TRACK, a);
   if (rippleK > 0.01f) {
-    float e = easeOut(fmodf(nowMs / 1000.f, 2.2f) / 2.2f), k = 1 + 0.5f * e;
+    float e = easeOut(fmodf(host.now / 1000.f, 2.2f) / 2.2f), k = 1 + 0.5f * e;
     gfx::ringAt(ox, oy, (R + 1.6f) * k, 3 * k, gfx::c565(p.m1), 0.55f * (1 - e) * rippleK * a);
   }
   if (cheer >= 0) drawCheer(ox, oy, R, cheer, a);
@@ -698,10 +674,10 @@ void homeText(float a, float e) {
   shift(sx, sy);
   float cx = 233 + sx;
   float k0 = piece(e, 2), k1 = piece(e, 3);
-  if (linkState != ONLINE) {
-    text::centre(LABEL, 4, linkState == CONNECTING ? "CONNECTING…" : "LINK LOST", cx, 322 + int(sy + 16 * (1 - k0)),
+  if (host.link != ONLINE) {
+    text::centre(LABEL, 4, host.link == CONNECTING ? "CONNECTING…" : "LINK LOST", cx, 322 + int(sy + 16 * (1 - k0)),
                  gfx::c565(TEXT_2), a * k0);
-    text::centre(LABEL, 3, linkState == CONNECTING ? "AGENTSMONITOR" : "RECONNECTING…", cx, 364 + int(sy + 16 * (1 - k1)),
+    text::centre(LABEL, 3, host.link == CONNECTING ? "AGENTSMONITOR" : "RECONNECTING…", cx, 364 + int(sy + 16 * (1 - k1)),
                  gfx::c565(TEXT_3), a * k1);
     return;
   }
@@ -716,13 +692,13 @@ void homeText(float a, float e) {
   if (fabsf(off) > 0.5f && cur.count > 1) {
     int i = indexOf(s->key), j = (i + (off < 0 ? 1 : cur.count - 1)) % cur.count;
     float nx = cx + off + (off < 0 ? SLIDE : -SLIDE);
-    captionOf(cur.sessions[j], nx, dy, a * gfx::clamp01(fabsf(off) / SLIDE * 1.5f), false, nowMs);
+    captionOf(cur.sessions[j], nx, dy, a * gfx::clamp01(fabsf(off) / SLIDE * 1.5f), false, host.now);
   }
   if (f < 1) {
     // A change not made by a finger: the old lines lift away, then the new rise into place
     float out = gfx::clamp01(f / 0.45f), in = gfx::clamp01((f - 0.3f) / 0.7f);
     int p = indexOf(cap.prevKey);
-    if (p >= 0 && out < 1) captionOf(cur.sessions[p], cx + off, dy - 14 * out, a * (1 - out), false, nowMs);
+    if (p >= 0 && out < 1) captionOf(cur.sessions[p], cx + off, dy - 14 * out, a * (1 - out), false, host.now);
     if (in > 0) captionOf(*s, cx + off, dy + 14 * (1 - in), a * in * k0, true, cap.since);
     return;
   }
@@ -737,14 +713,14 @@ const Session *alertSession(int *pick) {
   int k = 0;
   for (int w = 0; w < waitCount; w++)
     if (!strcmp(waits[w].key, focusKey)) k = w;
-  if (waitCount > 1) k = (k + int((nowMs - alertAt) / ROTATE_MS)) % waitCount;
+  if (waitCount > 1) k = (k + int((host.now - alertAt) / ROTATE_MS)) % waitCount;
   *pick = k;
   int i = indexOf(waits[k].key);
   return i < 0 ? nullptr : &cur.sessions[i];
 }
 
 void alertBack(float a) {
-  float t = nowMs / 1000.f;
+  float t = host.now / 1000.f;
   uint16_t amber = gfx::c565(TONE_COLORS[ATTN]);
   float breath = 0.82f + 0.18f * sinf(t * gfx::TAU / 2.4f);
   // Amber light rising toward the rim, a fine ring, and a comet running round it
@@ -772,7 +748,7 @@ void alertText(float a, float e) {
   text::centre(LABEL, 4, heading, cx, 158 + int(sy + lift(1)), amber, fade(1));
   static char shownKey[96];
   static int64_t shownAt;
-  if (strcmp(shownKey, s->key)) snprintf(shownKey, sizeof shownKey, "%s", s->key), shownAt = nowMs;
+  if (strcmp(shownKey, s->key)) snprintf(shownKey, sizeof shownKey, "%s", s->key), shownAt = host.now;
   title(titleOf(*s), 4, cx, cx, 212 + int(sy + lift(2)), 340, gfx::c565(TEXT), fade(2), shownAt);
 
   // What it waits on: the tool and its subject, or the question
@@ -795,7 +771,7 @@ void alertText(float a, float e) {
     bottom = top + h - lift(3);
   }
   char wait[24], foot[140], project[64];
-  duration(wallMs - waitSince(*s), wait, sizeof wait);
+  duration(host.wall - waitSince(*s), wait, sizeof wait);
   text::fit(PROP, 3, s->project, 250, project, sizeof project);
   snprintf(foot, sizeof foot, "%s · %s", project, wait);
   text::centre(PROP, 3, foot, cx, int(bottom + 42 + lift(4)), gfx::c565(TEXT_3), fade(4));
@@ -830,7 +806,7 @@ void listLayer(float a, float e) {
   float k0 = piece(e, 1);
   text::centre(LABEL, 3, head, 233 + sx, 106 + int(sy + 14 * (1 - k0)), gfx::c565(TEXT_3), a * k0);
 
-  int pressed = drag == Drag::Undecided && to == LIST ? rowAt(downY) : -1;
+  int pressed = drag == Drag::Undecided && to == LIST ? rowAt(finger.downY) : -1;
   for (int i = 0; i < cur.count; i++) {
     const Session &s = cur.sessions[i];
     float k = piece(e, 5 + i);  // rows wait for the orb to pass on its way up
@@ -857,7 +833,7 @@ void listLayer(float a, float e) {
     // On the right: how long it waits, what it runs, or how long since it finished
     char side[64], word[64];
     if (isWaiting(s)) {
-      duration(wallMs - waitSince(s), side, sizeof side);
+      duration(host.wall - waitSince(s), side, sizeof side);
     } else if (s.stale) {
       snprintf(side, sizeof side, "—");
     } else if (s.status == Status::Tool) {
@@ -866,7 +842,7 @@ void listLayer(float a, float e) {
     } else if (model::working(s.status)) {
       snprintf(side, sizeof side, "%s", s.status == Status::Compacting ? "PACK" : "THINK");
     } else {
-      age(wallMs - (s.endedAt ? s.endedAt : s.since), side, sizeof side, false);
+      age(host.wall - (s.endedAt ? s.endedAt : s.since), side, sizeof side, false);
     }
     int sideW = text::width(LABEL, 3, side);
     text::draw(LABEL, 3, side, x1 - sideW, int(cy + 10), gfx::c565(toneText(t)), alpha);
@@ -998,12 +974,12 @@ void detailLayer(float a, float e) {
 void drawPress() {
   uint16_t w = gfx::c565(TEXT);
   if (drag == Drag::Undecided) {
-    float e = easeOut(gfx::clamp01((nowMs - pressAt) / 350.f));
+    float e = easeOut(gfx::clamp01((host.now - pressAt) / 350.f));
     gfx::glowAt(pressX, pressY, 30 + 14 * e, w, 0.14f * e);
     gfx::ringAt(pressX, pressY, 10 + 16 * e, 1.4f, w, 0.25f * e);
     return;
   }
-  float t = (nowMs - releaseAt) / 450.f;
+  float t = (host.now - releaseAt) / 450.f;
   if (t < 0 || t >= 1) return;
   float e = easeOut(t);
   if (pressTapped) gfx::ringAt(pressX, pressY, 26 + 44 * e, 2 - e, w, 0.3f * (1 - e));
@@ -1024,9 +1000,9 @@ void compose() {
   // a bounce. A failed one: red, a shake of the head and a flinch. The later
   // wins; both play out on the home screen.
   halo::Palette p = pal;
-  float c = (nowMs - cheerAt) / 1000.f, f = (nowMs - winceAt) / 1000.f;
-  bool cheering = linkState == ONLINE && c >= 0 && c < CHEER_S && cheerAt >= winceAt;
-  bool wincing = linkState == ONLINE && f >= 0 && f < WINCE_S && winceAt > cheerAt;
+  float c = (host.now - cheerAt) / 1000.f, f = (host.now - winceAt) / 1000.f;
+  bool cheering = host.link == ONLINE && c >= 0 && c < CHEER_S && cheerAt >= winceAt;
+  bool wincing = host.link == ONLINE && f >= 0 && f < WINCE_S && winceAt > cheerAt;
   float shake = 0;
   if (cheering) {
     float w = c < 0.25f ? smooth(c / 0.25f) : c < 1.3f ? 1 : 1 - smooth((c - 1.3f) / (CHEER_S - 1.3f));
@@ -1052,7 +1028,7 @@ void compose() {
   gfx::tag(P_BACK);
   halo::background(p.m1, glowK * home, ox, oy, R - 4);
   gfx::tag(P_SKY);
-  halo::stars(nowMs / 1000.f, 0.9f);
+  halo::stars(host.now / 1000.f, 0.9f);
   gfx::tag(P_RIM);
   if (home > 0.01f) homeBack(p, ox, oy, R, shown(HOME), cheering ? c : -1, wincing ? f : -1);
   if (present(ALERT) > 0.01f) alertBack(shown(ALERT));
@@ -1079,10 +1055,10 @@ void compose() {
 void tap(int y) {
   pressTapped = true;
   // Any tap answers the reminders of the waits on screen
-  tracker.ack();
+  theme::ack();
   switch (to) {
     case ALERT:
-      alertUntil = nowMs;
+      alertUntil = host.now;
       go(HOME);
       break;
     case HOME:
@@ -1101,18 +1077,6 @@ void tap(int y) {
     }
     case DETAIL: go(backTo); break;
   }
-}
-
-// The finger's speed over about its last 60 ms, px/s
-void velocity(float &vx, float &vy) {
-  vx = vy = 0;
-  if (sampleCount < 2) return;
-  const Sample &last = samples[(sampleCount - 1) % 6];
-  int oldest = sampleCount > 6 ? sampleCount - 6 : 0, k = sampleCount - 2;
-  while (k > oldest && last.ms - samples[k % 6].ms < 60) k--;
-  const Sample &s = samples[k % 6];
-  float dt = (last.ms - s.ms) / 1000.f;
-  if (dt > 0) vx = (last.x - s.x) / dt, vy = (last.y - s.y) / dt;
 }
 
 // How far a finger has carried a move between screens
@@ -1144,198 +1108,166 @@ void decide(int dx, int dy) {
       break;
     case ALERT:
       d = Drag::Move, target = HOME;
-      tracker.ack();
+      theme::ack();
       break;
   }
   drag = d;
-  releaseAt = nowMs;  // the press light gives way
+  releaseAt = host.now;  // the press light gives way
   pressTapped = false;
   if (d == Drag::Move) {
     moveFrom = to;
-    if (target == HOME && to == ALERT) alertUntil = nowMs;
+    if (target == HOME && to == ALERT) alertUntil = host.now;
     go(target, true);
   }
 }
 
-}  // namespace
+// ---------- The theme ----------
 
-bool init(const uint8_t *cjk, size_t cjkLen) { return gfx::init() && halo::init() && text::init(cjk, cjkLen); }
+class Halo final : public theme::Theme {
+ public:
+  bool init() override { return halo::init(); }
 
-void link(Link state) {
-  if (state != ONLINE) {
-    // Nothing on screen is current any more
-    haveSummary = false;
-    tracker.clear();
+  void reset() override {
     focusKey[0] = 0;
     drag = Drag::None;
     go(HOME);
   }
-  linkState = state;
-}
 
-bool summary(const char *json) {
-  static model::Summary next;
-  if (!model::parse(json, next)) return false;
-  // The daemon's clock, taken again only when it has moved: a summary read
-  // twice says the same time twice
-  if (next.ts != summaryTs) summaryAt = nowMs, summaryTs = next.ts;
-  if (!wallMs) wallMs = next.ts;
-  follow(next);
-  syncSats();
-  return true;
-}
+  void event(const events::Event &e, const model::Summary &next) override { happened(e, next); }
 
-void touch(Touch kind, int x, int y, int64_t ms) {
-  lastTouch = ms;
-  int dx = x - downX, dy = y - downY;
-  switch (kind) {
-    case DOWN:
-      drag = Drag::Undecided;
-      downX = lastX = x, downY = lastY = y, downAt = ms;
-      pressAt = nowMs, pressX = float(x), pressY = float(y);
-      scrollAtDown = listScroll;
-      listVel = 0;
-      sampleCount = 0;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      break;
-    case MOVE: {
-      if (drag == Drag::None) break;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      lastX = x, lastY = y;
-      if (drag == Drag::Undecided && dx * dx + dy * dy > 10 * 10) decide(dx, dy);
-      if (drag == Drag::Caption) {
-        cap.off.x = cur.count > 1 ? float(dx) : dx * 0.25f;  // with one session it only gives a little
-        cap.off.v = 0;
-      } else if (drag == Drag::Move) {
-        float c = carried(dx, dy);
-        trans.x = c < 0 ? 0 : c > 1.05f ? 1.05f : c;
-        trans.v = 0;
-      } else if (drag == Drag::Scroll) {
-        float raw = scrollAtDown - dy, max = listMax();
-        // Past either end the list gives less and less
-        listScroll = raw < 0 ? raw * 0.4f : raw > max ? max + (raw - max) * 0.4f : raw;
-      }
-      break;
-    }
-    case UP: {
-      if (drag == Drag::None) break;
-      samples[sampleCount++ % 6] = {x, y, ms};
-      float vx, vy;
-      velocity(vx, vy);
-      Drag was = drag;
-      drag = Drag::None;
-      releaseAt = nowMs;
-      if (was == Drag::Undecided) {
-        pressTapped = false;
-        if (dx * dx + dy * dy < 14 * 14 && ms - downAt < 600) tap(y);
-      } else if (was == Drag::Caption) {
-        bool next = cur.count > 1 && (dx < -70 || vx < -500), prev = cur.count > 1 && (dx > 70 || vx > 500);
-        if (next || prev) {
-          const Session *f = focused();
-          int i = f ? indexOf(f->key) : 0;
-          i = (i + (next ? 1 : cur.count - 1)) % cur.count;
-          choose(cur.sessions[i].key);
-          // The new title is already on screen, sliding in; it carries on from there
-          snprintf(cap.key, sizeof cap.key, "%s", cur.sessions[i].key);
-          cap.fade.x = 1, cap.fade.v = 0;
-          cap.since = nowMs;
-          cap.line[0] = 0;
-          cap.off.x = dx + (next ? SLIDE : -SLIDE);
+  void summary() override {
+    if (!waitCount && to == ALERT) go(HOME);
+    syncSats();
+  }
+
+  void touch(Touch kind, int x, int y, int64_t ms) override {
+    lastTouch = ms;
+    int dx = x - finger.downX, dy = y - finger.downY;
+    switch (kind) {
+      case ui::DOWN:
+        drag = Drag::Undecided;
+        finger.down(x, y, ms);
+        pressAt = host.now, pressX = float(x), pressY = float(y);
+        scrollAtDown = listScroll;
+        listVel = 0;
+        break;
+      case ui::MOVE: {
+        if (drag == Drag::None) break;
+        finger.move(x, y, ms);
+        if (drag == Drag::Undecided && finger.dragging()) decide(dx, dy);
+        if (drag == Drag::Caption) {
+          cap.off.x = cur.count > 1 ? float(dx) : dx * 0.25f;  // with one session it only gives a little
+          cap.off.v = 0;
+        } else if (drag == Drag::Move) {
+          float c = carried(dx, dy);
+          trans.x = c < 0 ? 0 : c > 1.05f ? 1.05f : c;
+          trans.v = 0;
+        } else if (drag == Drag::Scroll) {
+          float raw = scrollAtDown - dy, max = listMax();
+          // Past either end the list gives less and less
+          listScroll = raw < 0 ? raw * 0.4f : raw > max ? max + (raw - max) * 0.4f : raw;
         }
-        cap.off.v = vx;
-      } else if (was == Drag::Move) {
-        float c = carried(dx, dy);
-        float speed = carried(int(vx), int(vy));  // moves per second, in the move's direction
-        if (c > 0.35f || speed > 2.5f) {
-          driving = false;
-          trans.v = speed > 0 ? speed : 0;
-        } else {
-          go(moveFrom);  // not far enough: back it goes
-          trans.v = speed < 0 ? -speed : 0;
-        }
-      } else if (was == Drag::Scroll) {
-        listVel = -vy;
-        if (listVel > 4000) listVel = 4000;
-        if (listVel < -4000) listVel = -4000;
+        break;
       }
-      break;
+      case ui::UP: {
+        if (drag == Drag::None) break;
+        finger.up(x, y, ms);
+        float vx, vy;
+        finger.velocity(vx, vy);
+        Drag was = drag;
+        drag = Drag::None;
+        releaseAt = host.now;
+        if (was == Drag::Undecided) {
+          pressTapped = false;
+          if (finger.tapped(ms)) tap(y);
+        } else if (was == Drag::Caption) {
+          bool next = cur.count > 1 && (dx < -70 || vx < -500), prev = cur.count > 1 && (dx > 70 || vx > 500);
+          if (next || prev) {
+            const Session *f = focused();
+            int i = f ? indexOf(f->key) : 0;
+            i = (i + (next ? 1 : cur.count - 1)) % cur.count;
+            choose(cur.sessions[i].key);
+            // The new title is already on screen, sliding in; it carries on from there
+            snprintf(cap.key, sizeof cap.key, "%s", cur.sessions[i].key);
+            cap.fade.x = 1, cap.fade.v = 0;
+            cap.since = host.now;
+            cap.line[0] = 0;
+            cap.off.x = dx + (next ? SLIDE : -SLIDE);
+          }
+          cap.off.v = vx;
+        } else if (was == Drag::Move) {
+          float c = carried(dx, dy);
+          float speed = carried(int(vx), int(vy));  // moves per second, in the move's direction
+          if (c > 0.35f || speed > 2.5f) {
+            driving = false;
+            trans.v = speed > 0 ? speed : 0;
+          } else {
+            go(moveFrom);  // not far enough: back it goes
+            trans.v = speed < 0 ? -speed : 0;
+          }
+        } else if (was == Drag::Scroll) {
+          listVel = -vy;
+          if (listVel > 4000) listVel = 4000;
+          if (listVel < -4000) listVel = -4000;
+        }
+        break;
+      }
     }
   }
-}
 
-// The halo keeps nothing for rare moments
-void summon(int64_t) {}
-
-// Once goes at once, so twice passes through HOME on its way to LIST
-void press(int64_t ms) {
-  static int64_t lastPress = -100000;
-  if (drag != Drag::None) return;  // a finger on the glass has it
-  lastTouch = ms;
-  tracker.ack();
-  if (ms - lastPress < TWICE_MS) {
-    lastPress = -100000;
-    listScroll = listVel = 0;  // the most pressing at the top
-    go(LIST);
-    return;
+  // Once goes at once, so twice passes through HOME on its way to LIST. The
+  // halo keeps nothing for rare moments, so it has no summon().
+  void press(int times, int64_t ms) override {
+    lastTouch = ms;
+    if (times == 2) {
+      listScroll = listVel = 0;  // the most pressing at the top
+      go(LIST);
+      return;
+    }
+    // The most urgent under the orb, the swiped-to one let go
+    focusKey[0] = 0;
+    alertUntil = ms;
+    go(HOME);
   }
-  lastPress = ms;
-  // The most urgent under the orb, the swiped-to one let go
-  focusKey[0] = 0;
-  alertUntil = ms;
-  go(HOME);
-}
 
-void frame(int64_t ms, int64_t wall) {
-  nowMs = ms;
-  float dt = lastMs ? (ms - lastMs) / 1000.f : 0;
-  if (dt > 0.1f) dt = 0.1f;
-  lastMs = ms;
-  if (wall) {
-    wallMs = wall;
-  } else {
-    // Kept by the summaries, and never turned back by one that was slower to
-    // arrive than the last: timers on screen only count up. A minute or more
-    // back is the clock itself being set.
-    int64_t w = summaryTs + (ms - summaryAt);
-    if (w > wallMs || wallMs - w > 60000) wallMs = w;
+  void frame() override {
+    step(host.dt);
+    halo::newFrame(host.dt);
+    text::newFrame();
+    uint32_t t0 = gfx::ticks();
+    gfx::record(true);
+    compose();
+    gfx::record(false);
+    recTicks += gfx::ticks() - t0;
+    partFrames++;
   }
-  step(dt);
-  halo::newFrame(dt);
-  text::newFrame();
-  uint32_t t0 = gfx::ticks();
-  gfx::record(true);
-  compose();
-  gfx::record(false);
-  recTicks += gfx::ticks() - t0;
-  partFrames++;
-}
 
-void draw(uint16_t *band, int y0, int y1) {
-  uint32_t spent[gfx::TAGS] = {};
-  gfx::play(band, y0, y1, spent);
-  for (int p = 0; p < PARTS; p++)
-    if (spent[p]) partTicks[p] += spent[p];
-}
+  void draw(uint16_t *band, int y0, int y1) override {
+    uint32_t spent[gfx::TAGS] = {};
+    gfx::play(band, y0, y1, spent);
+    for (int p = 0; p < PARTS; p++)
+      if (spent[p]) partTicks[p] += spent[p];
+  }
 
-int cue() {
-  if (cueHead == cueTail) return -1;
-  int c = cues[cueHead];
-  cueHead = (cueHead + 1) % 8;
-  return c;
-}
+  const char *screen() const override {
+    static const char *const NAMES[] = {"home", "alert", "list", "detail"};
+    return NAMES[to];
+  }
 
-const char *screen() {
-  static const char *const NAMES[] = {"home", "alert", "list", "detail"};
-  return NAMES[to];
-}
+  void timings(char *out, size_t len) override {
+    float k = partFrames ? 1 / (gfx::ticksPerMs() * partFrames) : 0;
+    size_t n = snprintf(out, len, "rec %.1f grid %.1f ", recTicks * k, halo::gridTicks * k);
+    recTicks = halo::gridTicks = 0;
+    for (int p = 0; p < PARTS && n < len; p++) n += snprintf(out + n, len - n, "%s %.1f ", PART_NAMES[p], partTicks[p].exchange(0) * k);
+    if (n < len) snprintf(out + n, len - n, "list %uK", unsigned(gfx::listUsed() + 1023) / 1024);
+    partFrames = 0;
+  }
+};
 
-void timings(char *out, size_t len) {
-  float k = partFrames ? 1 / (gfx::ticksPerMs() * partFrames) : 0;
-  size_t n = snprintf(out, len, "rec %.1f grid %.1f ", recTicks * k, halo::gridTicks * k);
-  recTicks = halo::gridTicks = 0;
-  for (int p = 0; p < PARTS && n < len; p++) n += snprintf(out + n, len - n, "%s %.1f ", PART_NAMES[p], partTicks[p].exchange(0) * k);
-  if (n < len) snprintf(out + n, len - n, "list %uK", unsigned(gfx::listUsed() + 1023) / 1024);
-  partFrames = 0;
-}
+}  // namespace
+}  // namespace halo
 
-}  // namespace ui
+theme::Theme &theme::instance() {
+  static halo::Halo halo;
+  return halo;
+}

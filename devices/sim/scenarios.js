@@ -1,5 +1,6 @@
-// Scripts for the review page: each is a list of [seconds, step(world, now)]
-// played against virtual time, so they can be sped up.
+// Scripts for the review page and snap.mjs: each is a list of
+// [seconds, step(world, now)] played against virtual time, so they can be
+// sped up. Names and notes come in each of the page's languages.
 
 const AM = { project: 'AgentsMonitor' }
 const t = (title, extra = {}) => ({ ...AM, title, ...extra })
@@ -7,8 +8,11 @@ const t = (title, extra = {}) => ({ ...AM, title, ...extra })
 export const SCENARIOS = [
   {
     id: 'day',
-    name: '日常节奏',
-    note: '四个会话交替工作：中途有人等你授权、有人提问、有一轮出错。约 2 分钟一轮，循环播放。',
+    name: { en: 'A day\'s rhythm', zh: '日常节奏' },
+    note: {
+      en: 'Four sessions take turns working; along the way one waits for approval, one asks a question and one turn fails. About two minutes, on a loop.',
+      zh: '四个会话交替工作：中途有人等你授权、有人提问、有一轮出错。约 2 分钟一轮，循环播放。',
+    },
     length: 120,
     loop: true,
     script: [
@@ -41,8 +45,11 @@ export const SCENARIOS = [
   },
   {
     id: 'wait',
-    name: '等你授权，一直不处理',
-    note: '3 秒时有会话请求授权，之后没人处理。把速度调到 10× 或 30×，可以听到 2 分钟、5 分钟、之后每 10 分钟的轻提醒；轻点屏幕后不再提醒。',
+    name: { en: 'An approval nobody answers', zh: '等你授权，一直不处理' },
+    note: {
+      en: 'At 3 s a session asks for approval, and nobody answers. Speed up to 10× or 30× to hear the gentle reminders at 2 and 5 minutes, then every 10; a tap on the screen stops them.',
+      zh: '3 秒时有会话请求授权，之后没人处理。把速度调到 10× 或 30×，可以听到 2 分钟、5 分钟、之后每 10 分钟的轻提醒；轻点屏幕后不再提醒。',
+    },
     length: 3600,
     script: [
       [0, (w, n) => {
@@ -55,8 +62,11 @@ export const SCENARIOS = [
   },
   {
     id: 'many-waits',
-    name: '三个会话同时等你',
-    note: '2、4、6 秒各有一个会话开始等你：提醒卡会每 4 秒轮换一个，底部圆点表示第几个。20 秒时其中一个被处理。',
+    name: { en: 'Three waiting at once', zh: '三个会话同时等你' },
+    note: {
+      en: 'At 2, 4 and 6 s a session starts waiting for you: the alert takes each in turn every 4 s. At 20 s one of them is answered.',
+      zh: '2、4、6 秒各有一个会话开始等你：提醒每 4 秒轮换一个。20 秒时其中一个被处理。',
+    },
     length: 60,
     script: [
       [0, (w, n) => {
@@ -72,8 +82,11 @@ export const SCENARIOS = [
   },
   {
     id: 'full',
-    name: '满载 8 个会话',
-    note: '8 个会话、长标题：看标题滚动、列表滚动和外圈卫星的拥挤程度。第一个会话用中文标题，展示中文像素字体。',
+    name: { en: 'Eight sessions, all busy', zh: '满载 8 个会话' },
+    note: {
+      en: 'Eight sessions with long titles: watch titles scroll, lists fill and the screen get crowded. The first has a Chinese title, in the hanzi pixel font.',
+      zh: '8 个会话、长标题：看标题滚动、列表填满和屏幕变拥挤。第一个会话用中文标题，展示中文像素字体。',
+    },
     length: 60,
     script: [
       [0, (w, n) => {
@@ -94,8 +107,11 @@ export const SCENARIOS = [
   },
   {
     id: 'endings',
-    name: '完成与出错',
-    note: '依次：完成一轮（轻响，光球变绿并荡出涟漪和火花）、出错（低沉下行音，光球变红并摇头抖动）、被拒、中断（不响）。听一下每种提示音，看光球和卫星的变化。',
+    name: { en: 'Finished and failed', zh: '完成与出错' },
+    note: {
+      en: 'In turn: a turn finishes (a soft chime), one fails (a low falling tone), one is refused and one is interrupted (no sound). Listen to each chime and watch how the theme reacts.',
+      zh: '依次：完成一轮（轻响）、出错（低沉下行音）、被拒、中断（不响）。听一下每种提示音，看主题如何反应。',
+    },
     length: 30,
     script: [
       [0, (w, n) => {
@@ -112,8 +128,11 @@ export const SCENARIOS = [
   },
   {
     id: 'unseen',
-    name: '完成了但还没看',
-    note: '3 秒时一个会话做完、8 秒时一个出错，你都没在看：它们一直醒着等你，单只视图优先显示，全部视图顶部写 2 DONE。30 秒时你在电脑上打开第一个，它就回去打盹。调到 30× 可以听到 5 分钟后的再次提醒。也可以随时点“在电脑上打开所有会话”。',
+    name: { en: 'Finished, not yet seen', zh: '完成了但还没看' },
+    note: {
+      en: 'At 3 s a session finishes and at 8 s one fails while you are away: both stay up, waiting for you. At 30 s you open the first on the computer and it settles. At 30× you can hear the second reminder after 5 minutes. "Open all sessions on the computer" does the same at any time.',
+      zh: '3 秒时一个会话做完、8 秒时一个出错，你都没在看：它们一直醒着等你。30 秒时你在电脑上打开第一个，它就安静下来。调到 30× 可以听到 5 分钟后的再次提醒。也可以随时点“在电脑上打开所有会话”。',
+    },
     length: 600,
     script: [
       [0, (w, n) => {
@@ -130,8 +149,11 @@ export const SCENARIOS = [
   },
   {
     id: 'legend-crowd',
-    name: '传说：五个一起干活',
-    note: '四个会话在工作，3 秒时第五个开始：隐藏的飞龙登场，变成最新那个会话的宠物。上滑看全部，它的名字是金色的。',
+    name: { en: 'Legend: five at work', zh: '传说：五个一起干活' },
+    note: {
+      en: 'Four sessions are working, and at 3 s a fifth starts: a rare moment. In pets, the hidden dragon arrives as the newest session\'s pet; swipe up to see its golden name.',
+      zh: '四个会话在工作，3 秒时第五个开始：一个稀有时刻。在 pets 里，隐藏的飞龙登场，变成最新那个会话的宠物；上滑看全部，它的名字是金色的。',
+    },
     length: 60,
     script: [
       [0, (w, n) => {
@@ -149,8 +171,11 @@ export const SCENARIOS = [
   },
   {
     id: 'legend-streak',
-    name: '传说：十连胜',
-    note: '一个会话每 2 秒顺利完成一轮，连续 10 轮（约 20 秒）后飞龙登场。',
+    name: { en: 'Legend: ten in a row', zh: '传说：十连胜' },
+    note: {
+      en: 'One session finishes a turn well every 2 s; after 10 in a row (about 20 s) comes a rare moment. In pets, the dragon arrives.',
+      zh: '一个会话每 2 秒顺利完成一轮，连续 10 轮（约 20 秒）后迎来稀有时刻。在 pets 里，飞龙登场。',
+    },
     length: 40,
     script: [
       [0, (w, n) => {
@@ -165,15 +190,21 @@ export const SCENARIOS = [
   },
   {
     id: 'empty',
-    name: '没有会话',
-    note: '连接正常但没有任何会话：灰色光球缓慢呼吸。',
+    name: { en: 'No sessions', zh: '没有会话' },
+    note: {
+      en: 'Connected, but there are no sessions at all.',
+      zh: '连接正常，但没有任何会话。',
+    },
     length: 30,
     script: [],
   },
   {
     id: 'link',
-    name: '断线与重连',
-    note: '3 秒时连接断开，8 秒时重连中，11 秒时恢复。',
+    name: { en: 'Link lost and back', zh: '断线与重连' },
+    note: {
+      en: 'At 3 s the link drops, at 8 s it is reconnecting, and at 11 s it is back.',
+      zh: '3 秒时连接断开，8 秒时重连中，11 秒时恢复。',
+    },
     length: 30,
     script: [
       [0, (w, n) => {
