@@ -9,8 +9,9 @@
 // ONE follows the summary's order, which puts first whoever waits for you,
 // then whoever works, newest turn first, then the idle: a pet that just
 // finished a turn leads for a while, and one a finger picks holds until the
-// finger has been away ten seconds. Swiping sideways steps through them in
-// that order; dots along the bottom show where it is.
+// finger has been away ten seconds. Swiping sideways steps through the pets
+// in their places on ALL, which never shuffle; dots along the bottom show
+// where it is.
 //
 // A finished turn stays with its pet until the person opens the session on
 // the computer (the daemon says so), starts another turn, or taps the pet:
@@ -1295,8 +1296,8 @@ void oneText(float a) {
       for (int q = 0; q < bar; q++)
         for (int r = 87; r <= 88; r++) board::light(bx + q, r, q < filled ? c : dim, (q < filled ? 0.9f : 0.25f) * a);
     }
-    // Its project and agent
-    char proj[64], agent[32], line[96], fit[96];
+    // Its project and agent, scrolling when they do not fit
+    char proj[64], agent[32], line[96];
     text::upper(s->project, proj, sizeof proj);
     agentName(s->agent, agent, sizeof agent);
     bool legend = p && dragonNow(*p);
@@ -1305,21 +1306,21 @@ void oneText(float a) {
       snprintf(line, sizeof line, "%s DRAGON · %s", sprites::COAT[p->coat].name, proj);
     else
       snprintf(line, sizeof line, "%s · %s", proj, agent);
-    if (board::tinyWidth(line) > roomAt(97)) snprintf(line, sizeof line, legend ? "%s DRAGON" : "%s", legend ? sprites::COAT[p->coat].name : proj);
-    board::tinyFit(line, roomAt(97) / 4, fit, sizeof fit);
-    board::tinyCentre(fit, cx, 95, legend ? accent[p->coat] : white, (legend ? 0.8f : 0.4f) * a);
+    marquee(true, line, cx, 95, roomAt(97), legend ? accent[p->coat] : white, (legend ? 0.8f : 0.4f) * a, titleSince);
   }
 
-  // A dot for each session in order, this one long, each in its state's colour
-  if (cur.count > 1) {
-    int w = (cur.count - 1) * 3 + 3, x = iround(MID - w / 2.f);
-    for (int i = 0; i < cur.count; i++) {
-      const Session &o = cur.sessions[i];
-      bool here = !strcmp(o.key, oneKey);
-      const Pet *op = petOf(o.key);
-      uint16_t c = op ? actColor(actOf(*op, &o)) : dim;
-      if (op && actOf(*op, &o) == NAP) c = white;
-      if (op && dragonNow(*op)) c = accent[op->coat];
+  // A dot for each pet in its order at home, this one long, each in its
+  // state's colour
+  Pet *order[PETS];
+  int many = ranked(order);
+  if (many > 1) {
+    int w = (many - 1) * 3 + 3, x = iround(MID - w / 2.f);
+    for (int i = 0; i < many; i++) {
+      const Pet &op = *order[i];
+      bool here = !strcmp(op.key, oneKey);
+      Act act = actOf(op, find(op.key));
+      uint16_t c = act == NAP ? white : actColor(act);
+      if (dragonNow(op)) c = accent[op.coat];
       for (int q = 0; q < (here ? 3 : 1); q++) board::light(x + q, 104, c, (here ? 0.95f : 0.4f) * a);
       x += here ? 5 : 3;
     }
@@ -1395,13 +1396,15 @@ int onePetAt(int x, int y) {
   return -1;
 }
 
-// The session before or after key in the summary's order
+// The pet before or after key in their order at home
 const char *neighbour(const char *key, int dir) {
-  if (!cur.count) return nullptr;
+  Pet *order[PETS];
+  int n = ranked(order);
+  if (!n) return nullptr;
   int at = 0;
-  for (int i = 0; i < cur.count; i++)
-    if (!strcmp(cur.sessions[i].key, key)) at = i;
-  return cur.sessions[(at + dir + cur.count) % cur.count].key;
+  for (int i = 0; i < n; i++)
+    if (!strcmp(order[i]->key, key)) at = i;
+  return order[(at + dir + n) % n]->key;
 }
 
 void tap(int x, int y) {
