@@ -4,9 +4,9 @@
 
 #include <emscripten.h>
 
-#include "../ui/gfx.h"
-#include "../ui/synth.h"
-#include "../ui/ui.h"
+#include "gfx.h"
+#include "synth.h"
+#include "ui.h"
 
 namespace {
 uint16_t fb[gfx::W * gfx::H];

@@ -14,7 +14,7 @@
     {
       "name": "device",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8466", "--bind", "127.0.0.1", "--directory", "device"],
+      "runtimeArgs": ["-m", "http.server", "8466", "--bind", "127.0.0.1", "--directory", "devices"],
       "port": 8466
     }
   ]

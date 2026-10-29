@@ -3,9 +3,8 @@ node_modules
 /web/dist
 .DS_Store
 *.tsbuildinfo
-device/web/build/
-device/firmware/build/
-device/firmware/agentsmon_display/build/
-device/firmware/agentsmon_display/src/
-device/firmware/agentsmon_display/secrets.h
+devices/sim/build/
+devices/boards/*/build/
+devices/boards/*/src/
+devices/boards/*/secrets.h
 /web/.env.local

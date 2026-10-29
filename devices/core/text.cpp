@@ -133,7 +133,7 @@ struct Latin {
 Latin latin[sizeof ART / sizeof *ART];
 constexpr int SPACE = 3;  // columns a space takes
 
-// The hanzi font, cjk10.bin (see device/fonts/make_cjk.py)
+// The hanzi font, cjk10.bin (see devices/fonts/make_cjk.py)
 const uint8_t *cjk;
 int cjkCount;
 const uint8_t *cjkCodes, *cjkOffsets, *cjkData;

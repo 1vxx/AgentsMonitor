@@ -5,13 +5,14 @@
 
 // The display's screens and behaviour, with no platform underneath: the
 // firmware and the review page both feed it summaries and touches, and take
-// frames and chimes from it.
+// frames and chimes from it. Each display program in devices/apps implements
+// this, so any of them runs on any board whose screen it fits.
 namespace ui {
 
 enum Link { CONNECTING, ONLINE, LOST };
 enum Touch { DOWN, MOVE, UP };
 
-// cjk: the hanzi bitmap font, device/fonts/cjk10.bin (Latin text needs nothing)
+// cjk: the hanzi bitmap font, devices/fonts/cjk10.bin (Latin text needs nothing)
 bool init(const uint8_t *cjk, size_t cjkLen);
 void link(Link state);
 // A summary, or a WebSocket message carrying one; false if it can't be read

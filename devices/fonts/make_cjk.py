@@ -1,10 +1,10 @@
 """Cuts Fusion Pixel Font 10px (OFL, github.com/TakWolf/fusion-pixel-font) to
 the hanzi of GB2312 and CJK punctuation, as the bitmap file the display reads.
 
-Latin text has its own 5x7 font in device/ui/text.cpp; this one only covers
+Latin text has its own 5x7 font in devices/core/text.cpp; this one only covers
 what a Chinese session title needs.
 
-    python3 -I device/fonts/make_cjk.py <fusion-pixel-10px-proportional-zh_hans.bdf>
+    python3 -I devices/fonts/make_cjk.py <fusion-pixel-10px-proportional-zh_hans.bdf>
 
 cjk10.bin, little-endian:
     "PXF1", u16 count, u8 ascent, u8 descent

@@ -1,6 +1,8 @@
 // Plays a short script through the UI on the host and writes the frames it
 // names as PPM files, for checking screens without a browser or a device.
 //   snap <cjk10.bin> <out dir>
+// Built from devices/:
+//   c++ -O2 -std=c++17 -Icore core/*.cpp apps/halo/*.cpp apps/halo/tools/snap.cpp -o snap
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,9 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "../gfx.h"
-#include "../synth.h"
-#include "../ui.h"
+#include "gfx.h"
+#include "synth.h"
+#include "ui.h"
 
 namespace {
 

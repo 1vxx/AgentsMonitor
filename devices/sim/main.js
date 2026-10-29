@@ -1,4 +1,4 @@
-// The review page: runs the UI core (build/ui.js, from ../ui) on a canvas,
+// The review page: runs a display program (build/ui.js, see build.sh) on a canvas,
 // turns the mouse into touches, plays its chimes, and feeds it summaries from
 // a scripted world or from the daemon itself.
 
