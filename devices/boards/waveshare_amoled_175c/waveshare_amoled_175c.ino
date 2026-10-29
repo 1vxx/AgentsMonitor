@@ -133,7 +133,9 @@ void loop() {
 
   touch::Event e = touch::poll();
   if (e.kind != touch::NONE) ui::touch(ui::Touch(e.kind - 1), e.x, e.y, nowMs());
-  if (button::poll()) ui::press(nowMs());
+  button::Event b = button::poll();
+  if (b == button::PRESS) ui::press(nowMs());
+  if (b == button::HOLD) ui::summon(nowMs());
 
   uint32_t t0 = micros();
   ui::frame(nowMs());

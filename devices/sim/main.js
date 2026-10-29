@@ -37,6 +37,7 @@ const ui = {
   },
   touch: (kind, x, y, ms) => mod._am_touch(kind, x, y, ms),
   press: ms => mod._am_press(ms),
+  summon: ms => mod._am_summon(ms),
   frame: (ms, wall) => mod._am_frame(ms, wall),
   cue: () => mod._am_cue(),
   screen: () => {
@@ -296,6 +297,14 @@ addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'b' && !e.repeat && !(e.target instanceof HTMLInputElement)) side()
 })
 
+// The other button: held 3 s, it summons, once per hold
+let holding
+$('boot').onpointerdown = e => {
+  $('boot').setPointerCapture(e.pointerId)
+  holding = setTimeout(() => ui.summon(performance.now() + skew), 3000)
+}
+$('boot').onpointerup = $('boot').onpointercancel = () => clearTimeout(holding)
+
 // ---------- Display ----------
 
 const applyZoom = () => {
@@ -386,4 +395,5 @@ window.preview = {
   },
   touch: (kind, x, y) => ui.touch(kind, x, y, performance.now() + skew),
   press: () => ui.press(performance.now() + skew),
+  summon: () => ui.summon(performance.now() + skew),
 }

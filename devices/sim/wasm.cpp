@@ -27,6 +27,8 @@ EMSCRIPTEN_KEEPALIVE void am_touch(int kind, int x, int y, double ms) { ui::touc
 
 EMSCRIPTEN_KEEPALIVE void am_press(double ms) { ui::press(int64_t(ms)); }
 
+EMSCRIPTEN_KEEPALIVE void am_summon(double ms) { ui::summon(int64_t(ms)); }
+
 // Draws a frame and returns it as RGBA, with everything outside the round panel transparent
 EMSCRIPTEN_KEEPALIVE uint8_t *am_frame(double ms, double wall) {
   double t0 = emscripten_get_now();

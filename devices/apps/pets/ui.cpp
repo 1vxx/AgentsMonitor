@@ -23,7 +23,8 @@
 // The legend: five sessions at work at once, or ten turns in a row finished
 // well, turn one pet into a jade dragon for the rest of its session. It
 // arrives with a show of its own (a sweep across the sky trailing embers, a
-// dive, a burst, fire along the ground) and a chime of its own.
+// dive, a burst, fire along the ground) and a chime of its own. Holding the
+// other button calls it to the pet ONE shows, there and then.
 //
 // A pet keeps its animal and its place for as long as its session lives.
 // Thinking it nods, running a tool it jitters and throws sparks, compacting
@@ -1667,6 +1668,18 @@ void touch(Touch kind, int x, int y, int64_t ms) {
       break;
     }
   }
+}
+
+// The dragon called to the pet ONE shows, whatever the count: from another
+// pet if it is about, or again to this one in a new coat; its entrance waits
+// for the alert like any
+void summon(int64_t ms) {
+  lastTouch = ms;
+  Pet *p = petOf(oneKey);
+  if (!p || p->leaving) return;
+  if (Pet *had = legendKey[0] ? petOf(legendKey) : nullptr) had->legend = false;
+  legendKey[0] = 0;
+  crown(oneKey);
 }
 
 // Once goes at once, so twice passes through ONE on its way to ALL

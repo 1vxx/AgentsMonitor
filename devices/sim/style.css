@@ -88,6 +88,16 @@ main {
   transform: translate(-50%, -50%) rotate(45deg) translateY(-3px);
 }
 
+/* The other button, at the bottom right */
+.side.low {
+  top: 85.4%;
+  transform: translate(-50%, -50%) rotate(-45deg) translateY(6px);
+}
+
+.side.low:active {
+  transform: translate(-50%, -50%) rotate(-45deg) translateY(3px);
+}
+
 canvas {
   width: 466px;
   height: 466px;

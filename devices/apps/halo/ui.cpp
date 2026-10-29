@@ -1263,6 +1263,9 @@ void touch(Touch kind, int x, int y, int64_t ms) {
   }
 }
 
+// The halo keeps nothing for rare moments
+void summon(int64_t) {}
+
 // Once goes at once, so twice passes through HOME on its way to LIST
 void press(int64_t ms) {
   static int64_t lastPress = -100000;
