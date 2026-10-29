@@ -14,6 +14,7 @@ namespace board {
 namespace {
 
 uint16_t *cells;          // N x N, native RGB565, 0 for dark
+uint8_t lit[N];           // rows with any cell lit, so render() can skip the rest
 int16_t span[N][2];       // each row's cells inside the round, [i0, i1)
 float lvl = 1;
 int dxNudge, dyNudge;
@@ -22,9 +23,6 @@ int clip0, clip1 = N, clipFade;  // the columns lit from here on, and their fadi
 // How much of a lit cell's colour each of its 4 x 4 pixels takes, in 32nds:
 // a round dot two pixels across with a soft edge, a hairline gap to the next
 const uint8_t DOT[4][4] = {{2, 12, 12, 2}, {12, 32, 32, 12}, {12, 32, 32, 12}, {2, 12, 12, 2}};
-// A dark cell's faint dot, byte-swapped as the panel takes it
-uint16_t dark[4][4];
-constexpr uint16_t DARK = 0x10A2;  // RGB565 of (16, 20, 16): just there on black
 
 // The 3x5 capitals: rows top to bottom, '#' lit
 struct Tiny {
@@ -92,8 +90,6 @@ bool init() {
     int i0 = gfx::iceil(MID - h - 0.5f), i1 = gfx::ifloor(MID + h - 0.5f) + 1;
     span[j][0] = int16_t(i0 < 0 ? 0 : i0), span[j][1] = int16_t(i1 > N ? N : i1);
   }
-  for (int v = 0; v < 4; v++)
-    for (int u = 0; u < 4; u++) dark[v][u] = DOT[v][u] == 32 ? gfx::swap(DARK) : 0;
   memset(tinyBits, 0, sizeof tinyBits);
   for (const Tiny &t : TINY) {
     uint16_t b = parse(t.rows);
@@ -106,6 +102,7 @@ bool init() {
 
 void clear() {
   memset(cells, 0, N * N * sizeof(uint16_t));
+  memset(lit, 0, sizeof lit);
   lvl = 1;
   dxNudge = dyNudge = 0;
   clip0 = 0, clip1 = N, clipFade = 0;
@@ -128,6 +125,7 @@ void light(int i, int j, uint16_t c, float a) {
   int al = int(a * lvl * 32 + 0.5f);
   if (al <= 0) return;
   uint16_t &cell = cells[j * N + i];
+  lit[j] = 1;
   if (al >= 32) {
     cell = c;
     return;
@@ -189,54 +187,27 @@ void fontCentre(text::Face f, const char *s, float cx, int base, uint16_t c, flo
 }
 
 HOT void render(uint16_t *band, int y0, int y1) {
+  // Black, then a dot for each lit cell
+  memset(band, 0, size_t(y1 - y0) * gfx::W * sizeof(uint16_t));
   for (int y = y0; y < y1; y++) {
-    uint16_t *row = band + (y - y0) * gfx::W;
-    int x0 = gfx::inside[y][0], x1 = gfx::inside[y][1];
-    if (x1 <= x0) {
-      memset(row, 0, gfx::W * sizeof(uint16_t));
-      continue;
-    }
-    if (x0 > 0) memset(row, 0, x0 * sizeof(uint16_t));
-    if (x1 < gfx::W) memset(row + x1, 0, (gfx::W - x1) * sizeof(uint16_t));
     int yy = y - ORG, j = yy >> 2;
-    if (yy < 0 || j >= N) {
-      memset(row + x0, 0, (x1 - x0) * sizeof(uint16_t));
-      continue;
-    }
-    int v = yy & 3;
+    if (yy < 0 || j >= N || !lit[j]) continue;
+    uint16_t *row = band + (y - y0) * gfx::W;
     const uint16_t *line = cells + j * N;
-    const uint8_t *w = DOT[v];
-    const uint16_t *d = dark[v];
-    // Pixels left of cell 0 and right of the last are dark
-    int xs = x0 < ORG ? ORG : x0, xe = x1 > ORG + N * PITCH ? ORG + N * PITCH : x1;
-    for (int x = x0; x < xs; x++) row[x] = 0;
-    for (int x = xe; x < x1; x++) row[x] = 0;
-    int x = xs;
-    // Whole cells four pixels at a time; the part cells at either end one by one
-    auto one = [&](int px) {
-      int u = (px - ORG) & 3;
-      uint16_t c = line[(px - ORG) >> 2];
-      if (!c) {
-        row[px] = d[u];
-        return;
-      }
-      uint32_t s = gfx::spread(c) * w[u] >> 5 & 0x07E0F81F;
-      row[px] = gfx::swap(uint16_t(s | s >> 16));
-    };
-    while (x < xe && ((x - ORG) & 3)) one(x++);
-    for (; x + 4 <= xe; x += 4) {
-      uint16_t c = line[(x - ORG) >> 2];
-      if (!c) {
-        row[x] = d[0], row[x + 1] = d[1], row[x + 2] = d[2], row[x + 3] = d[3];
-        continue;
-      }
+    const uint8_t *w = DOT[yy & 3];
+    int x0 = gfx::inside[y][0], x1 = gfx::inside[y][1];
+    for (int i = span[j][0]; i < span[j][1]; i++) {
+      uint16_t c = line[i];
+      if (!c) continue;
       uint32_t s = gfx::spread(c);
-      for (int u = 0; u < 4; u++) {
+      int px = ORG + i * PITCH;
+      for (int u = 0; u < PITCH; u++) {
+        int x = px + u;
+        if (x < x0 || x >= x1) continue;
         uint32_t p = s * w[u] >> 5 & 0x07E0F81F;
-        row[x + u] = gfx::swap(uint16_t(p | p >> 16));
+        row[x] = gfx::swap(uint16_t(p | p >> 16));
       }
     }
-    while (x < xe) one(x++);
   }
 }
 

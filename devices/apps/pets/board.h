@@ -6,8 +6,8 @@
 
 // The panel as a board of LED dots: 116 x 116 cells 4 px apart, each lit in
 // one colour or dark. A frame lights cells; render() turns them into pixels,
-// a round dot per lit cell and a faint one per dark cell, so whatever is
-// drawn sits on the same grid and moves a whole dot at a time.
+// a round dot per lit cell on pure black, so whatever is drawn sits on the
+// same grid and moves a whole dot at a time.
 namespace board {
 
 constexpr int N = 116, PITCH = 4, ORG = 1;  // cells across; px per cell; px left of cell 0
