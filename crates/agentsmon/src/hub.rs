@@ -79,8 +79,10 @@ pub struct Presence {
     pub session_id: String,
     pub ended: bool,
     pub transcript: Option<String>,
-    /// Its last turn ended after the person last opened it.
-    pub unseen: bool,
+    /// When its last turn ended, if the person has not opened it since.
+    pub unseen_since: Option<i64>,
+    /// Neither at work nor waiting, and not gone quiet.
+    pub idle: bool,
 }
 
 /// What a collector read about a session, for [`Hub::observe`].
@@ -781,7 +783,12 @@ impl Hub {
                 session_id: s.session_id.clone(),
                 ended: s.is_ended(),
                 transcript: s.meta.transcript_path.clone(),
-                unseen: s.last_turn.as_ref().is_some_and(|t| s.seen_at.is_none_or(|at| at < t.ended_at)),
+                unseen_since: s
+                    .last_turn
+                    .as_ref()
+                    .filter(|t| s.seen_at.is_none_or(|at| at < t.ended_at))
+                    .map(|t| t.ended_at),
+                idle: s.status == Status::Idle && !s.stale,
             })
             .collect()
     }

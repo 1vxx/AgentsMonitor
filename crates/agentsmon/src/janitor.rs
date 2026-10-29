@@ -181,11 +181,21 @@ pub fn quick_pass(hub: &Hub) -> Quick {
     quick
 }
 
-/// The seen pass, every few seconds: for the sessions whose last turn ended
-/// after the person last opened them, whether they have opened them since,
-/// as Claude Desktop records it. Nothing is read while there are none.
+/// How long after a turn ends the displays show it as unseen, so how long the
+/// seen pass looks out for its session being opened.
+const UNSEEN_MS: i64 = 60 * 60_000;
+
+/// The seen pass, every few seconds: for the idle sessions whose last turn
+/// ended in the last hour and that the person has not opened since, whether
+/// they have now, as Claude Desktop records it. Nothing is read while there
+/// are none, which is most of the time.
 pub fn seen_pass(hub: &Hub) -> usize {
-    let unseen: Vec<_> = hub.presence().into_iter().filter(|p| p.unseen && !p.ended).collect();
+    let now = now_ms();
+    let unseen: Vec<_> = hub
+        .presence()
+        .into_iter()
+        .filter(|p| p.idle && !p.ended && p.unseen_since.is_some_and(|end| now - end < UNSEEN_MS))
+        .collect();
     if unseen.is_empty() {
         return 0;
     }
@@ -337,6 +347,47 @@ mod tests {
         assert_eq!((all.forgotten, all.pass.ended), (1, 1));
         let left: Vec<String> = hub.sessions().into_iter().map(|s| s.key).collect();
         assert_eq!(left, vec!["claude-code:live".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_seen_pass_looks_only_at_idle_sessions_finished_in_the_last_hour() {
+        let dir = std::env::temp_dir().join(format!("agentsmon-seen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
+        let now = now_ms();
+        // Claude Desktop says each was opened just now
+        let folder = dir.join("desktop").join("acct").join("org");
+        std::fs::create_dir_all(&folder).unwrap();
+        for sid in ["recent", "old", "busy"] {
+            std::fs::write(folder.join(format!("local_{sid}.json")), format!(r#"{{"cliSessionId":"{sid}","lastFocusedAt":{now}}}"#)).unwrap();
+        }
+        *hub.watch.lock() = Watch { desktop: Desktop::at(dir.join("desktop")), ..Watch::default() };
+
+        let event = |sid: &str, ts: i64, rest: &str| {
+            serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{ts},{rest}}}"#)).unwrap()
+        };
+        let start = r#""type":"turn.start""#;
+        let end = r#""type":"turn.end","outcome":"answer""#;
+        let hour = 3_600_000;
+        hub.ingest(vec![
+            // Finished a minute ago: looked for
+            event("recent", now - 120_000, start),
+            event("recent", now - 60_000, end),
+            // Finished two hours ago: past what the displays show
+            event("old", now - 2 * hour - 60_000, start),
+            event("old", now - 2 * hour, end),
+            // Finished, then at work again
+            event("busy", now - 120_000, start),
+            event("busy", now - 90_000, end),
+            event("busy", now - 30_000, start),
+        ]);
+        assert_eq!(seen_pass(&hub), 1);
+        let seen = |sid: &str| hub.session(&format!("claude-code:{sid}")).and_then(|s| s.seen_at);
+        assert_eq!((seen("recent"), seen("old"), seen("busy")), (Some(now), None, None));
+        // Seen now, it is not looked for again
+        assert_eq!(seen_pass(&hub), 0);
         std::fs::remove_dir_all(&dir).ok();
     }
 
