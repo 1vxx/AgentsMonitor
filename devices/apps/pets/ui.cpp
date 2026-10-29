@@ -1434,8 +1434,9 @@ void link(Link state) {
 bool summary(const char *json) {
   static model::Summary next;
   if (!model::parse(json, next)) return false;
-  summaryAt = nowMs;
-  summaryTs = next.ts;
+  // The daemon's clock, taken again only when it has moved: a summary read
+  // twice says the same time twice
+  if (next.ts != summaryTs) summaryAt = nowMs, summaryTs = next.ts;
   if (!wallMs) wallMs = next.ts;
   follow(next);
   syncPets();
@@ -1517,7 +1518,15 @@ void frame(int64_t ms, int64_t wall) {
   float dt = lastMs ? (ms - lastMs) / 1000.f : 0;
   if (dt > 0.1f) dt = 0.1f;
   lastMs = ms;
-  wallMs = wall ? wall : summaryTs + (ms - summaryAt);
+  if (wall) {
+    wallMs = wall;
+  } else {
+    // Kept by the summaries, and never turned back by one that was slower to
+    // arrive than the last: timers on screen only count up. A minute or more
+    // back is the clock itself being set.
+    int64_t w = summaryTs + (ms - summaryAt);
+    if (w > wallMs || wallMs - w > 60000) wallMs = w;
+  }
   step(dt);
   uint32_t t0 = gfx::ticks();
   compose();

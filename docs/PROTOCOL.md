@@ -65,7 +65,7 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | --- | --- |
 | `GET /v1/health` | Name, version, protocol and uptime. Never requires a token |
 | `GET /v1/snapshot` | `{server, sessions, quotas, summary}` for the sessions in memory: running ones not idle for 2 h, and those ended in the last 30 min (both under `[sessions]` in the config) |
-| `GET /v1/summary` | The compact summary for display devices |
+| `GET /v1/summary` | The compact summary for display devices, its `ts` the time it is read. |
 | `GET /v1/sessions` | `scope=live` (default) returns sessions in memory; `scope=all` pages through the store. Also `agent`, `limit` (default 100, max 1,000) and `offset` |
 | `GET /v1/sessions/{key}` | One session, from memory or the store |
 | `GET /v1/sessions/{key}/events` | The session's timeline, newest first. `before` (a `seq`) and `limit` (default 200, max 2,000) |

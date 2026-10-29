@@ -149,8 +149,12 @@ async fn snapshot(State(api): State<Api>) -> Response {
     Json(api.hub.snapshot()).into_response()
 }
 
+// Stamped with the time it is read: a display polling it keeps its clock by
+// `ts`, and the summary itself is only rebuilt when something changed
 async fn summary(State(api): State<Api>) -> Response {
-    Json(api.hub.summary()).into_response()
+    let mut summary = api.hub.summary();
+    summary.ts = now_ms();
+    Json(summary).into_response()
 }
 
 #[derive(Deserialize)]
