@@ -1,55 +1,90 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="AgentsMonitor: every coding agent, at a glance" width="100%">
+  <img src="docs/assets/banner.svg" alt="AgentsMonitor: your coding agents, in the corner of your eye" width="100%">
 </p>
 
 <p align="center">
-  <b>Know what every coding agent is doing, without switching windows.</b><br>
-  A tiny local daemon that watches your Claude Code and Codex sessions, and shows them<br>
-  in your browser, in your terminal, or on a little screen on your desk.
+  <b>Hand your agents the work. Go watch a show.</b><br>
+  A little round screen on your desk keeps an eye on every Claude Code and Codex session,<br>
+  and tells you the moment one of them needs you.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7c6cf0?style=flat-square"></a>
-  <img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-e9774f?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Platform: macOS | Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-5a6bb8?style=flat-square">
   <img alt="Works with Claude Code and Codex" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-f0aa2e?style=flat-square">
+  <img alt="Display: ESP32-S3 or any screen" src="https://img.shields.io/badge/display-ESP32--S3%20%C2%B7%20any%20screen-e9774f?style=flat-square">
+  <img alt="Platform: macOS | Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-5a6bb8?style=flat-square">
 </p>
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
 ---
 
-## ✨ Why
+## 🎬 Look up only when it matters
 
-You have three agents running. One has been waiting for your approval for ten minutes, one finished a while ago, and one hit an error you haven't seen. AgentsMonitor watches every session on your machine, so you can tell at a glance who is thinking, who is running a tool, who needs you and who is done.
+You give Claude Code a refactor, start Codex on a test suite, and go do something else: an episode, a scroll through X, a ranked match. One question keeps pulling you back to the terminal: *is it done yet, or has it been waiting for me all along?*
 
-- 🛰️ **Live status.** See whether each session is thinking, running a tool (and which one), waiting for your approval or answer, compacting, or idle.
-- 🔢 **Exact token counts.** Every model request is counted from the agents' own logs, along with context fill and your five-hour and weekly limits.
-- 🖥️ **Web dashboard.** Live session cards, a timeline for each session, history, the event stream and usage charts.
-- 📟 **A screen on your desk.** Optional. Firmware for a round AMOLED board is included, and [porting it to your own hardware](devices/README.md#-make-it-yours) is part of the design.
-- 🪶 **Featherweight.** Hooks never make your agent wait, and the daemon uses about 7 MB of memory.
-- 🔒 **Local only.** Nothing leaves your machine, and every kind of data has a retention limit.
+AgentsMonitor answers it from the corner of your eye. A small round display beside your monitor shows every agent at once, in a colour you can read without looking and a chime you can hear without looking at all. No alt-tabbing, no peeking at terminals, and no more coming back to find an approval that sat unanswered for twenty minutes.
 
-## 🔭 A look
-
-<p align="center"><img src="docs/assets/dashboard-live.jpg" width="100%" alt="The dashboard's Live view: two sessions wait for you, two are working, usage limits for Claude and Codex"></p>
+## 👀 At a glance
 
 <table>
   <tr>
-    <td align="center"><img src="docs/assets/halo-home.png" width="190" alt="halo: the mood orb with sessions orbiting it"><br><sub><b>halo</b>: the mood orb</sub></td>
-    <td align="center"><img src="docs/assets/halo-approve.png" width="190" alt="halo: a session asks to run a command"><br><sub>who needs you, and for what</sub></td>
-    <td align="center"><img src="docs/assets/pets.png" width="190" alt="pets: six pixel animals, one per session"><br><sub><b>pets</b>: one animal per session</sub></td>
-    <td align="center"><img src="docs/assets/halo-list.png" width="190" alt="halo: every session in a list"><br><sub>every session at a glance</sub></td>
+    <th></th>
+    <th>🟠 Working</th>
+    <th>🟡 Needs you</th>
+    <th>🟢 Done</th>
+    <th>🔴 Failed</th>
+  </tr>
+  <tr>
+    <td align="center"><b><code>halo</code></b></td>
+    <td align="center"><img src="docs/assets/state-halo-working.png" width="150" alt="halo: an orange orb, a session thinking"></td>
+    <td align="center"><img src="docs/assets/state-halo-waiting.png" width="150" alt="halo: an amber card asking to approve a command"></td>
+    <td align="center"><img src="docs/assets/state-halo-done.png" width="150" alt="halo: the orb turns green, done just now"></td>
+    <td align="center"><img src="docs/assets/state-halo-failed.png" width="150" alt="halo: the orb turns red, failed"></td>
+  </tr>
+  <tr>
+    <td align="center"><b><code>pets</code></b></td>
+    <td align="center"><img src="docs/assets/state-pets-working.png" width="150" alt="pets: a fox thinking"></td>
+    <td align="center"><img src="docs/assets/state-pets-waiting.png" width="150" alt="pets: the fox asks to approve a command"></td>
+    <td align="center"><img src="docs/assets/state-pets-done.png" width="150" alt="pets: the fox done, with a heart"></td>
+    <td align="center"><img src="docs/assets/state-pets-failed.png" width="150" alt="pets: a bunny under a puff of smoke, failed"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>You hear</sub></td>
+    <td align="center"><sub>Nothing. Keep watching.</sub></td>
+    <td align="center"><sub>A chime, then gentle reminders at 2 and 5 minutes and every 10 after</sub></td>
+    <td align="center"><sub>A soft chime</sub></td>
+    <td align="center"><sub>A low, falling tone</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>You do</sub></td>
+    <td align="center"><sub>Nothing at all</sub></td>
+    <td align="center"><sub>Look up: it shows the exact command or question</sub></td>
+    <td align="center"><sub>Check the result when the episode ends</sub></td>
+    <td align="center"><sub>Go and see what broke</sub></td>
   </tr>
 </table>
 
-<sub>Every session here is made up: the dashboard ran on <a href="docs/USAGE.md#demo-mode">demo mode</a>, and the round screens come from the real display code. Try the display in your browser, no hardware needed: <a href="devices/README.md#-try-it-in-your-browser">Try it in your browser</a>.</sub>
+<sub>Real frames from the display code, rendered with made-up sessions. Two themes, one set of news: pick the one you like, or <a href="devices/themes/README.md">make your own</a>.</sub>
+
+## 📟 The desk display
+
+<img align="right" src="docs/assets/pets.png" width="200" alt="pets: six pixel animals, one per session, each acting out its state">
+
+- **One glance, every agent.** The screen takes the mood of all your sessions together: the one that needs you most always wins.
+- **It says what it wants.** An approval shows the command it wants to run, and a question shows the question, before you even reach for the keyboard.
+- **Swipe and tap.** Swipe through sessions, swipe up for the list, tap one for its tokens and context. The side button jumps to whoever needs you most; press it twice for everyone.
+- **Pick a look.** The glowing `halo`, the pixel `pets` (rumour says there's a dragon 🐉), or a theme of your own, started from a template in five minutes.
+- **Any screen will do.** The firmware targets the [Waveshare ESP32-S3-Touch-AMOLED-1.75C](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) only because it is the board on the author's desk. Port it to another ESP32 and screen, or turn a Raspberry Pi, an e-ink panel or an old phone into a display: all a display needs is one small JSON document.
+- **No board yet?** [Try it in your browser](devices/README.md#-try-it-in-your-browser): the same code, pixel for pixel.
+
+<br clear="right">
 
 ## 🚀 Quick start
 
-**You need** macOS or Linux, [Rust](https://rustup.rs) 1.95+, and Claude Code and/or Codex. For the web dashboard you also need Node.js 20.19+ and [pnpm](https://pnpm.io).
+**You need** macOS or Linux, [Rust](https://rustup.rs) 1.95+, and Claude Code and/or Codex.
 
-**1 · Install the daemon**
+**1 · Install the daemon.** It runs quietly in the background, using about 7 MB of memory.
 
 ```bash
 git clone https://github.com/1vxx/AgentsMonitor.git && cd AgentsMonitor
@@ -67,30 +102,35 @@ claude plugin marketplace add "$PWD" && claude plugin install agentsmon@agentsmo
 codex plugin marketplace add "$PWD" && codex plugin add agentsmon@agentsmon
 ```
 
-**3 · Watch.** Start a new agent session and it appears within a second 🎉
+`agentsmon status` now lists every session you start 🎉
+
+**3 · Put it on your desk.** Open the daemon to your Wi-Fi, give the board your network's name and the daemon's address, and flash it. About fifteen minutes, step by step in the [devices guide](devices/README.md#-build-the-reference-display). The last step is one line:
 
 ```bash
-agentsmon status                                 # in the terminal
-pnpm --dir web install && pnpm --dir web dev     # dashboard at http://127.0.0.1:5173
+THEME=halo devices/boards/waveshare_amoled_175c/build.sh --upload    # or THEME=pets
 ```
 
 > [!TIP]
-> If you get `agentsmon: command not found`, `~/.cargo/bin` is not on your `PATH` yet: [here's the fix](docs/USAGE.md#agentsmon-is-not-found-after-cargo-install). Want to look around before connecting an agent? `python3 scripts/demo.py` runs it all on [made-up sessions](docs/USAGE.md#demo-mode). Running from source, updating, uninstalling and configuration are all in the [usage guide](docs/USAGE.md).
+> Want to look around first? `python3 scripts/demo.py` runs everything on [made-up sessions](docs/USAGE.md#demo-mode), no agents needed. If you get `agentsmon: command not found`, `~/.cargo/bin` is not on your `PATH` yet: [here's the fix](docs/USAGE.md#agentsmon-is-not-found-after-cargo-install).
 
-## 📟 Put it on your desk
+## 📊 For the numbers, a dashboard
 
-<img align="right" src="docs/assets/pets-approve.png" width="170" alt="pets: a cat asks to approve a command">
+The display is for glancing. When you want the details (how many tokens today, how close you are to your limits, what happened while you were away), open the web dashboard:
 
-A screen beside your keyboard that lights up when an agent needs you, chimes when a turn finishes, and lets you swipe through every session.
+```bash
+pnpm --dir web install && pnpm --dir web dev    # needs Node.js 20.19+ and pnpm; opens on http://127.0.0.1:5173
+```
 
-- **Optional.** Everything above works without it.
-- **Not tied to one board.** The firmware targets the [Waveshare ESP32-S3-Touch-AMOLED-1.75C](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) only because that is the board the author has. The display code is split into a portable core, swappable themes and a thin layer per board, so another ESP32 with another screen needs only its own drivers.
-- **Bring anything.** A Raspberry Pi, an e-ink panel, an M5Stack, an old phone: anything that can make an HTTP request can be a display. It reads one small JSON document.
-- **Pick a look, or make one.** Themes change what the screen draws and how it moves: the glowing `halo`, the pixel `pets`, or [your own](devices/themes/README.md), started from a template in five minutes.
+<p align="center"><img src="docs/assets/dashboard-live.jpg" width="100%" alt="The dashboard's Live view: two sessions wait for you, two are working, usage limits for Claude and Codex"></p>
 
-👉 The [devices guide](devices/README.md) shows how to try it in your browser, flash the reference board, or port it to yours.
+Live session cards, a timeline for each session, history, the event stream, and token charts by model, by day and by source. All of it is in the [usage guide](docs/USAGE.md#dashboard).
 
-<br clear="right">
+## ✨ Under the hood
+
+- 🎯 **Exact token counts.** Every model request is counted once, from the agents' own logs, with your five-hour and weekly limits beside them.
+- 🪶 **Never in the way.** Hooks only queue an event and return, so an agent never waits on the monitor. The display draws at around 60 fps on a small ESP32-S3 board.
+- 🔒 **Local only.** Nothing leaves your machine. The display talks to your own computer over your own network, with a token.
+- 🧹 **Tidy by design.** Every kind of data has a retention limit, and sessions you delete or archive in Claude Code or Codex leave the monitor too.
 
 ## 🧩 How it works
 
@@ -105,46 +145,56 @@ A screen beside your keyboard that lights up when an agent needs you, chimes whe
                         │  reducer → sessions, quotas, tokens  │
                         │  SQLite (WAL), bounded retention     │
                         └───────────────────┬──────────────────┘
-                                            │  REST + WebSocket
+                                            │  REST + WebSocket, over your Wi-Fi
                ┌────────────────────┬───────┴────────────┬──────────────────────┐
                ▼                    ▼                    ▼                      ▼
-         Web dashboard       agentsmon status     ESP32 display        your own device
+        📟 desk display      your own device       web dashboard         agentsmon status
 ```
 
-Each agent reports what it does through a plugin, and the daemon reads the agents' own logs for exact token counts. One small daemon turns all of it into live state and serves it to whatever wants to show it. Other agents need only an adapter and an integration: see [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent).
+Each agent reports what it does through a plugin, and the daemon reads the agents' own logs for exact token counts. One small daemon turns all of it into live state, and every screen reads the same summary. Another agent needs only an adapter and an integration: see [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent).
+
+## 🤔 FAQ
+
+**Do I need the hardware?** No. The [browser preview](devices/README.md#-try-it-in-your-browser), the dashboard and `agentsmon status` all work without it. But a screen you never have to switch to is the whole point, and the reference board takes about fifteen minutes to set up.
+
+**Will it slow my agents down?** No. Hooks queue an event and return at once; one round trip to the daemon takes about 70 µs.
+
+**How far from my computer can the display be?** Anywhere on the same Wi-Fi. The daemon listens on your network only when you tell it to, and only with a token.
+
+**Which agents does it support?** Claude Code (terminal and Desktop) and Codex today. Others need only an adapter: [help wanted](docs/ARCHITECTURE.md#adding-an-agent).
+
+**Can I make it look like something else?** Yes, that's what themes are for. See the [theme guide](devices/themes/README.md).
 
 ## 📚 Documentation
 
 | Guide | What's inside |
 | --- | --- |
-| 🧭 [Usage guide](docs/USAGE.md) | CLI, configuration, token counting, session states, retention, privacy, troubleshooting |
-| 📟 [Devices](devices/README.md) | Review page, flashing the reference board, porting to your own hardware |
-| 🎨 [Themes](devices/themes/README.md) | Making a new look for the display: the interface, the toolbox, the checks |
+| 📟 [Devices](devices/README.md) | Try the display in your browser, flash the reference board, port it to your own hardware |
+| 🎨 [Themes](devices/themes/README.md) | Make a new look for the display: the interface, the toolbox, the checks |
+| 🧭 [Usage guide](docs/USAGE.md) | CLI, configuration, demo mode, the dashboard, token counting, retention, privacy, troubleshooting |
 | 🏗️ [Architecture](docs/ARCHITECTURE.md) | How the daemon works inside, and how to add another agent |
-| 🔌 [Protocol and API](docs/PROTOCOL.md) | Events, REST routes and WebSocket messages, for building your own client |
+| 🔌 [Protocol and API](docs/PROTOCOL.md) | Events, REST routes and WebSocket messages, for building your own display |
 | 🧩 Plugins | [Claude Code](plugins/claude-code/README.md) · [Codex](plugins/codex/README.md) |
 
 ## 🗂️ Repository
 
 | Path | Contents |
 | --- | --- |
+| `devices/` | The display: shared core, themes, boards, and the browser preview |
 | `crates/agentsmon` | The daemon, hook forwarder and CLI, in one binary |
 | `crates/agentsmon-protocol` | Wire types: events, sessions, quotas, summaries, WebSocket messages |
 | `plugins/` | The Claude Code plugin (a hooks module) and the Codex plugin (command hooks) |
 | `web/` | The web dashboard (React, Vite), started only when you want it |
-| `devices/` | Display firmware: shared core, themes, boards, and the browser review page |
 | `scripts/` | `demo.py`, the daemon on made-up sessions |
 | `docs/` | Guides and reference |
 
 ## 🗺️ Roadmap
 
 - [x] Daemon, protocol, storage, REST and WebSocket API
-- [x] Claude Code plugin: status, tools, subagents, approvals and questions, compaction, context, rate limits
-- [x] Exact token accounting from the agents' own logs, optionally with Claude Code's per-request telemetry
-- [x] Web dashboard
-- [x] Bounded retention that follows deletion and archiving in Claude Code and Codex
-- [x] Codex adapter and plugin
-- [x] Desk display: the reference board, the browser review page, and themes on a shared host (halo, pets, and a starter)
+- [x] Claude Code and Codex: status, tools, subagents, approvals and questions, compaction, context, rate limits
+- [x] Exact token accounting from the agents' own logs
+- [x] Desk display: the reference board, the browser preview, and themes on a shared host (halo, pets, and a starter)
+- [x] Web dashboard and bounded retention
 - [ ] More themes ([make one](devices/themes/README.md))
 - [ ] More boards and screen sizes ([help wanted](CONTRIBUTING.md))
 - [ ] More agents ([help wanted](docs/ARCHITECTURE.md#adding-an-agent))

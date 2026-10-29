@@ -144,7 +144,7 @@ Claude Code 插件的选项在 `/plugin` 里设置：
 
 ## 仪表盘
 
-<p align="center"><img src="assets/dashboard-usage.zh.jpg" width="100%" alt="用量页面：30 天的 token，按天、按模型、按来源"></p>
+<p align="center"><img src="assets/dashboard-usage.jpg" width="100%" alt="用量页面：30 天的 token，按天、按模型、按来源"></p>
 
 | 页面 | 显示内容 |
 | --- | --- |
