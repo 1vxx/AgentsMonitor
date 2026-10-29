@@ -57,11 +57,35 @@ main {
 }
 
 .bezel {
+  position: relative;
   padding: 18px;
   border-radius: 50%;
   background: #15161d;
   box-shadow: 0 0 0 1px #262836, 0 20px 60px rgba(0, 0, 0, 0.6);
   line-height: 0;
+}
+
+/* The side button at the board's top right, half out of the bezel */
+.side {
+  position: absolute;
+  left: 85.4%;
+  top: 14.6%;
+  width: 40px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #3a3d50;
+  border-radius: 4px;
+  background: #22242f;
+  cursor: pointer;
+  transform: translate(-50%, -50%) rotate(45deg) translateY(-6px);
+}
+
+.side:hover {
+  background: #2e3140;
+}
+
+.side:active {
+  transform: translate(-50%, -50%) rotate(45deg) translateY(-3px);
 }
 
 canvas {

@@ -36,6 +36,7 @@ const ui = {
     return ok
   },
   touch: (kind, x, y, ms) => mod._am_touch(kind, x, y, ms),
+  press: ms => mod._am_press(ms),
   frame: (ms, wall) => mod._am_frame(ms, wall),
   cue: () => mod._am_cue(),
   screen: () => {
@@ -287,6 +288,14 @@ canvas.onpointerdown = e => {
 canvas.onpointermove = e => e.buttons && ui.touch(1, ...point(e), performance.now())
 canvas.onpointerup = e => ui.touch(2, ...point(e), performance.now())
 
+// The side button: pressed once or twice, by mouse or the B key
+// (on the frames' clock, which a scripted run moves ahead)
+const side = () => ui.press(performance.now() + skew)
+$('side').onclick = side
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'b' && !e.repeat && !(e.target instanceof HTMLInputElement)) side()
+})
+
 // ---------- Display ----------
 
 const applyZoom = () => {
@@ -376,4 +385,5 @@ window.preview = {
     return ui.screen()
   },
   touch: (kind, x, y) => ui.touch(kind, x, y, performance.now() + skew),
+  press: () => ui.press(performance.now() + skew),
 }

@@ -5,6 +5,7 @@
 // Screens: HOME (the halo, with the focused session's title and state under
 // the orb), ALERT (the card that takes over when a session starts waiting for
 // you), LIST (every session, swiped up from home) and DETAIL (one session).
+// The side button once goes home to the most urgent session, twice to LIST.
 //
 // Moving between screens is one motion: the orb flies and resizes from where
 // one screen keeps it to where the next does, the leaving screen fades, and
@@ -66,6 +67,7 @@ constexpr int64_t ROTATE_MS = 4000;         // between waiting sessions on the c
 constexpr int64_t FOCUS_MS = 10000;         // a chosen session stays under the orb
 constexpr int64_t AWAY_MS = 30000;          // list and detail fall back home
 constexpr int64_t SHIFT_MS = 3 * 60000;     // anti burn-in nudge
+constexpr int64_t TWICE_MS = 450;           // the side button pressed again this soon: twice
 constexpr float CHEER_S = 2.6f;             // the orb's celebration of a finished turn
 constexpr float WINCE_S = 2.2f;             // and its wince at a failed one
 constexpr float MOVE_PX = 220;              // a finger this far carries a move all the way
@@ -1259,6 +1261,25 @@ void touch(Touch kind, int x, int y, int64_t ms) {
       break;
     }
   }
+}
+
+// Once goes at once, so twice passes through HOME on its way to LIST
+void press(int64_t ms) {
+  static int64_t lastPress = -100000;
+  if (drag != Drag::None) return;  // a finger on the glass has it
+  lastTouch = ms;
+  tracker.ack();
+  if (ms - lastPress < TWICE_MS) {
+    lastPress = -100000;
+    listScroll = listVel = 0;  // the most pressing at the top
+    go(LIST);
+    return;
+  }
+  lastPress = ms;
+  // The most urgent under the orb, the swiped-to one let go
+  focusKey[0] = 0;
+  alertUntil = ms;
+  go(HOME);
 }
 
 void frame(int64_t ms, int64_t wall) {

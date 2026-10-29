@@ -18,6 +18,9 @@ void link(Link state);
 // A summary, or a WebSocket message carrying one; false if it can't be read
 bool summary(const char *json);
 void touch(Touch kind, int x, int y, int64_t ms);
+// The side button, pressed and let go: once goes to the session that most
+// needs you, twice in quick succession to every session
+void press(int64_t ms);
 // Advances to `ms` on a steady clock and works out the frame, ready to draw.
 // `wall` is the epoch time that ages are measured against; 0 to follow the
 // last summary's clock.

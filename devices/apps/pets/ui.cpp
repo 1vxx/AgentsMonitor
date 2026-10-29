@@ -11,7 +11,8 @@
 // finished a turn leads for a while, and one a finger picks holds until the
 // finger has been away ten seconds. Swiping sideways steps through the pets
 // in their places on ALL, which never shuffle; dots along the bottom show
-// where it is.
+// where it is. The side button once goes back to ONE and whoever leads it,
+// twice to ALL.
 //
 // A finished turn stays with its pet until the person opens the session on
 // the computer (the daemon says so), starts another turn, or taps the pet:
@@ -84,6 +85,7 @@ constexpr int64_t NEWS_MS = 4000;       // and the line about it at the top
 constexpr int64_t UNSEEN_MS = 60 * 60000;  // a finished turn nobody opened stays this long
 constexpr int64_t NUDGE_MS = 5 * 60000;    // and chimes again once, this long after
 constexpr float MOVE_PX = 220;          // a finger this far carries a move all the way
+constexpr int64_t TWICE_MS = 450;       // the side button pressed again this soon: twice
 
 // ---------- State ----------
 
@@ -1586,6 +1588,24 @@ void touch(Touch kind, int x, int y, int64_t ms) {
       break;
     }
   }
+}
+
+// Once goes at once, so twice passes through ONE on its way to ALL
+void press(int64_t ms) {
+  static int64_t lastPress = -100000;
+  if (drag != Drag::None) return;  // a finger on the glass has it
+  lastTouch = ms;
+  tracker.ack();
+  if (ms - lastPress < TWICE_MS) {
+    lastPress = -100000;
+    go(ALL);
+    return;
+  }
+  lastPress = ms;
+  // Whoever ONE leads with, the finger's pick let go
+  chosenKey[0] = 0;
+  alertUntil = ms;
+  go(ONE);
 }
 
 void frame(int64_t ms, int64_t wall) {

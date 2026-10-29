@@ -1,7 +1,7 @@
 // AgentsMonitor's display, for the Waveshare ESP32-S3-Touch-AMOLED-1.75C.
 //
 // The screens are a display program from devices/apps on devices/core, the
-// same code the review page runs (build.sh copies them into src/). Core 1 reads touch, feeds the UI summaries and works
+// same code the review page runs (build.sh copies them into src/). Core 1 reads touch and the side buttons, feeds the UI summaries and works
 // out each frame; then both cores draw it a band of rows at a time in
 // internal RAM, and each band goes to the panel by DMA while more are drawn.
 // Core 0 also fetches summaries over Wi-Fi and plays chimes.
@@ -14,6 +14,7 @@
 #include <atomic>
 
 #include "audio.h"
+#include "button.h"
 #include "net.h"
 #include "panel.h"
 #include "src/cjk10.h"
@@ -105,6 +106,7 @@ void setup() {
   if (!ui::init(CJK10, sizeof CJK10)) Serial.println("display: no memory for the UI");
   Serial.printf("display: UI ready in %u ms\n", millis() - t0);
   if (!touch::begin()) Serial.println("display: touch not found");
+  if (!button::begin()) Serial.println("display: power chip not found, PWR button off");
   if (!audio::begin()) Serial.println("display: audio init failed");
   audio::play(synth::DONE);  // a soft chime says the speaker works
 
@@ -131,6 +133,7 @@ void loop() {
 
   touch::Event e = touch::poll();
   if (e.kind != touch::NONE) ui::touch(ui::Touch(e.kind - 1), e.x, e.y, nowMs());
+  if (button::poll()) ui::press(nowMs());
 
   uint32_t t0 = micros();
   ui::frame(nowMs());
