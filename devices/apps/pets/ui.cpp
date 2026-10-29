@@ -94,6 +94,8 @@ Screen from = ONE, to = ONE;
 Spring trans = {1, 0};  // 0: all `from`, 1: all `to`; overshoots a little
 bool driving;           // a finger is carrying the move
 Spring slide;           // ONE or the alert carried sideways, in cells
+char besideKey[96];     // the page next to it while it slides
+constexpr float PAGE = 108;  // cells between pages side by side, a title's width and a gap
 
 Link linkState = CONNECTING;
 model::Summary cur;
@@ -494,6 +496,7 @@ void go(Screen s, bool byFinger = false) {
   trans.x = 0, trans.v = 0;
   driving = byFinger;
   slide.x = slide.v = 0;
+  besideKey[0] = 0;
 }
 
 void callOut(const char *key) {
@@ -505,17 +508,28 @@ void callOut(const char *key) {
   go(ALERT);
 }
 
+// Where the page beside sits while one slides, in cells from the centre:
+// on the side the slide uncovers, one PAGE from the page that slides
+bool besideShows(float &x) {
+  if (!besideKey[0] || fabsf(slide.x) < 0.5f) return false;
+  x = slide.x > 0 ? slide.x - PAGE : slide.x + PAGE;
+  return true;
+}
+
 // A pet's place and how much of it shows on a screen
 Pose poseOn(Screen sc, const Pet &p) {
   if (sc == ALERT && !strcmp(p.key, alertKey)) return {MID + slide.x, 14, 4};
   if (sc == ONE && !strcmp(p.key, oneKey)) return {MID + slide.x, 17, 4};
+  float x;
+  if (sc == to && sc != ALL && !strcmp(p.key, besideKey) && besideShows(x)) return {MID + x, sc == ALERT ? 14.f : 17.f, 4};
   return {p.x.x, p.y.x, p.k.x};
 }
 
 float alphaOn(Screen sc, const Pet &p) {
-  if (sc == ALERT) return !strcmp(p.key, alertKey) ? 1 : 0;
-  if (sc == ONE) return !strcmp(p.key, oneKey) ? 1 : 0;
-  return 1;
+  if (sc == ALL) return 1;
+  float x;
+  if (!strcmp(p.key, sc == ALERT ? alertKey : oneKey) || (sc == to && !strcmp(p.key, besideKey) && besideShows(x))) return 1;
+  return 0;
 }
 
 // Who ONE shows: the pet a finger picked, while it holds; the one that just
@@ -680,21 +694,31 @@ void step(float dt) {
     if (!tracker.count || nowMs >= alertUntil) {
       go(ONE);
     } else if (at < 0 || (tracker.count > 1 && drag == Drag::None && nowMs - alertAt >= ROTATE_MS)) {
+      // The next one comes in from the right, pushing this one out
+      if (at >= 0) snprintf(besideKey, sizeof besideKey, "%s", alertKey), slide.x = PAGE, slide.v = 0;
       snprintf(alertKey, sizeof alertKey, "%s", tracker.waits[(at + 1) % tracker.count].key);
       alertAt = nowMs;
-      if (at >= 0) slide.x = 40, slide.v = 0;  // the next one comes in from the right
     }
   }
   if (to == ALL && drag == Drag::None && nowMs - lastTouch > AWAY_MS) go(ONE);
 
-  // ONE follows whoever leads; a new one comes in from the right
+  // ONE follows whoever leads; a new one comes in from its side in ALL's
+  // order, pushing the last out the other way
   const Session *f = focus();
   if (!f) {
     oneKey[0] = 0;
   } else if (strcmp(f->key, oneKey)) {
-    bool had = oneKey[0] && find(oneKey);
+    if (oneKey[0] && find(oneKey) && to == ONE && drag != Drag::Slide) {
+      Pet *order[PETS];
+      int n = ranked(order), was = -1, now = -1;
+      for (int i = 0; i < n; i++) {
+        if (!strcmp(order[i]->key, oneKey)) was = i;
+        if (!strcmp(order[i]->key, f->key)) now = i;
+      }
+      snprintf(besideKey, sizeof besideKey, "%s", oneKey);
+      slide.x = now >= 0 && now < was ? -PAGE : PAGE, slide.v = 0;
+    }
     snprintf(oneKey, sizeof oneKey, "%s", f->key);
-    if (had && to == ONE && drag != Drag::Slide) slide.x = 48, slide.v = 0;
   }
 
   // Five at work at once, as they get there, call the dragon to the newest
@@ -1146,12 +1170,35 @@ void allText(float a) {
   }
 }
 
+// ---------- Pages side by side ----------
+
+// The columns a page's words may light, narrower while two pages share the
+// panel, and the seam between them faded
+int pageL = 0, pageR = N;
+
+void unclip() { board::clip(pageL, pageR, pageL > 0 || pageR < N ? 6 : 0); }
+
+void pageClip(int l, int r) { pageL = l, pageR = r, unclip(); }
+
+// Draws the page at x and the one beside it at bx (in cells from the
+// centre), each on its own side of a seam halfway between them
+template <class Page>
+void twoPages(float x, float bx, Page page) {
+  int seam = iround(MID + (x + bx) / 2);
+  bool right = bx > x;
+  pageClip(right ? 0 : seam + 5, right ? seam - 4 : N);
+  page(false, MID + x);
+  pageClip(right ? seam + 5 : 0, right ? N : seam - 4);
+  page(true, MID + bx);
+  pageClip(0, N);
+}
+
 // ---------- Alert ----------
 
-void alertText(float a) {
-  const Session *s = find(alertKey);
+// One waiting session's page on the alert, centred on cx
+void alertPage(const char *key, float cx, float a) {
+  const Session *s = find(key);
   if (!s) return;
-  float cx = MID + slide.x;
   char buf[96];
   text::fit(text::PROP, 1, s->project, 100, buf, sizeof buf);
   board::fontCentre(text::PROP, buf, cx, 65, white, 0.95f * a);
@@ -1175,6 +1222,14 @@ void alertText(float a) {
       for (int k = 0; k < m; k++) board::fontCentre(text::PROP, lines[k], cx, 85 + k * 11, white, 0.8f * a);
     }
   }
+}
+
+void alertText(float a) {
+  float bx;
+  if (besideShows(bx))
+    twoPages(slide.x, bx, [&](bool beside, float cx) { alertPage(beside ? besideKey : alertKey, cx, a); });
+  else
+    alertPage(alertKey, MID + slide.x, a);
   // Which of the waiting pets this is
   if (tracker.count > 1)
     for (int k = 0; k < tracker.count; k++) {
@@ -1201,7 +1256,7 @@ void marquee(bool small, const char *s, float cx, int y, int maxW, uint16_t c, f
   int x0 = iround(cx - maxW / 2.f), loop = w + GAP;
   float t = (nowMs - since) / 1000.f - 2;
   int off = t <= 0 ? 0 : int(fmodf(t * 9, float(loop)));  // 9 dots a second
-  board::clip(x0, x0 + maxW, PAD);
+  board::clip(x0 > pageL ? x0 : pageL, x0 + maxW < pageR ? x0 + maxW : pageR, PAD);
   for (int k = 0; k < 2; k++) {
     float x = float(x0 + PAD - off + k * loop);
     if (small)
@@ -1209,30 +1264,18 @@ void marquee(bool small, const char *s, float cx, int y, int maxW, uint16_t c, f
     else
       board::font(text::PROP, s, x, y, c, a);
   }
-  board::clip(0, N, 0);
+  unclip();
 }
 
 char titleKey[96];
 int64_t titleSince;
 
-void oneText(float a) {
-  float t = nowMs / 1000.f;
-  const Session *s = find(oneKey);
-  if (!s) {
-    // Nobody here: a Z drifts where a pet would be; or not connected yet
-    static const char *const DOTS[] = {"", ".", "..", "..."};
-    char msg[32];
-    if (online())
-      snprintf(msg, sizeof msg, "NO SESSIONS");
-    else
-      snprintf(msg, sizeof msg, "%s%s", linkState == LOST ? "OFFLINE" : "CONNECTING", linkState == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
-    board::tinyCentre(msg, MID, 70, dim, 0.7f * a);
-    float ph = fmodf(t * 0.3f, 1);
-    board::tinyCentre("Z", MID + iround(ph * 4), 52 - iround(ph * 10), white, 0.5f * (1 - ph) * a, 2);
-    return;
-  }
-  float cx = MID + slide.x;
-  const Pet *p = petOf(oneKey);
+// One session's page on ONE, centred on cx: its title, what it is doing and
+// what it has used; its long lines scroll from `since`
+void onePage(const char *key, float cx, float a, int64_t since) {
+  const Session *s = find(key);
+  if (!s) return;
+  const Pet *p = petOf(key);
   Act act = p ? actOf(*p, s) : NAP;
 
   // The dragon's entrance: the words step back for its name, in its coat's colour
@@ -1250,16 +1293,13 @@ void oneText(float a) {
       board::clip(gx, gx + 4, 0);
       board::font(text::PROP, word, float(x0), 71, gfx::c565(coatFire[p->coat][0]), banner * a);
     }
-    board::clip(0, N, 0);
+    unclip();
   }
   float plain = a * (1 - banner);
   a *= hush;
 
-  // A new pet's lines start scrolling from the start
-  if (strcmp(titleKey, oneKey)) snprintf(titleKey, sizeof titleKey, "%s", oneKey), titleSince = nowMs;
-
   // The title, on one line that scrolls when it is long
-  marquee(false, s->title[0] ? s->title : s->project, cx, 71, 100, white, 0.95f * (a < plain ? a : plain), titleSince);
+  marquee(false, s->title[0] ? s->title : s->project, cx, 71, 100, white, 0.95f * (a < plain ? a : plain), since);
 
   // What it is doing; not connected, that first
   char opts[3][64], state[64];
@@ -1278,7 +1318,7 @@ void oneText(float a) {
       snprintf(ask, sizeof ask, tool[0] ? "APPROVE %s?" : "NEEDS APPROVAL", tool);
     }
     board::tinyCentre(ask, cx, 86, amber, 0.85f * a);
-    if (s->waitText[0] && ascii(s->waitText)) marquee(true, s->waitText, cx, 93, roomAt(95), white, 0.7f * a, titleSince);
+    if (s->waitText[0] && ascii(s->waitText)) marquee(true, s->waitText, cx, 93, roomAt(95), white, 0.7f * a, since);
   } else {
     // What it has used: tokens, and how full its context is as a row of
     // dots that turns amber at 70% and red at 90%
@@ -1308,8 +1348,33 @@ void oneText(float a) {
       snprintf(line, sizeof line, "%s DRAGON · %s", sprites::COAT[p->coat].name, proj);
     else
       snprintf(line, sizeof line, "%s · %s", proj, agent);
-    marquee(true, line, cx, 95, roomAt(97), legend ? accent[p->coat] : white, (legend ? 0.8f : 0.4f) * a, titleSince);
+    marquee(true, line, cx, 95, roomAt(97), legend ? accent[p->coat] : white, (legend ? 0.8f : 0.4f) * a, since);
   }
+}
+
+void oneText(float a) {
+  float t = nowMs / 1000.f;
+  if (!find(oneKey)) {
+    // Nobody here: a Z drifts where a pet would be; or not connected yet
+    static const char *const DOTS[] = {"", ".", "..", "..."};
+    char msg[32];
+    if (online())
+      snprintf(msg, sizeof msg, "NO SESSIONS");
+    else
+      snprintf(msg, sizeof msg, "%s%s", linkState == LOST ? "OFFLINE" : "CONNECTING", linkState == LOST ? "" : DOTS[int(t * 2.5f) % 4]);
+    board::tinyCentre(msg, MID, 70, dim, 0.7f * a);
+    float ph = fmodf(t * 0.3f, 1);
+    board::tinyCentre("Z", MID + iround(ph * 4), 52 - iround(ph * 10), white, 0.5f * (1 - ph) * a, 2);
+    return;
+  }
+  // A new pet's lines start scrolling from the start
+  if (strcmp(titleKey, oneKey)) snprintf(titleKey, sizeof titleKey, "%s", oneKey), titleSince = nowMs;
+  // The page beside, while it slides, with its lines at rest
+  float bx;
+  if (besideShows(bx))
+    twoPages(slide.x, bx, [&](bool beside, float cx) { onePage(beside ? besideKey : oneKey, cx, a, beside ? nowMs : titleSince); });
+  else
+    onePage(oneKey, MID + slide.x, a, titleSince);
 
   // A dot for each pet in its order at home, this one long, each in its
   // state's colour
@@ -1407,6 +1472,16 @@ const char *neighbour(const char *key, int dir) {
   for (int i = 0; i < n; i++)
     if (!strcmp(order[i]->key, key)) at = i;
   return order[(at + dir + n) % n]->key;
+}
+
+// The page after (dir 1) or before (-1) the one ONE or the alert shows
+const char *nextPage(int dir) {
+  if (to != ALERT) return neighbour(oneKey, dir);
+  if (!tracker.count) return nullptr;
+  int at = 0;
+  for (int k = 0; k < tracker.count; k++)
+    if (!strcmp(tracker.waits[k].key, alertKey)) at = k;
+  return tracker.waits[(at + dir + tracker.count) % tracker.count].key;
 }
 
 void tap(int x, int y) {
@@ -1537,8 +1612,12 @@ void touch(Touch kind, int x, int y, int64_t ms) {
       if (drag == Drag::Undecided && dx * dx + dy * dy > 10 * 10) decide(dx, dy);
       if (drag == Drag::Slide) {
         int many = to == ALERT ? tracker.count : cur.count;
-        slide.x = dx / float(board::PITCH) * (many > 1 ? 1 : 0.25f);
+        float x = dx / float(board::PITCH) * (many > 1 ? 1 : 0.25f);
+        slide.x = x < 1 - PAGE ? 1 - PAGE : x > PAGE - 1 ? PAGE - 1 : x;
         slide.v = 0;
+        // The page the finger uncovers comes in beside
+        const char *k = many > 1 && slide.x ? nextPage(slide.x < 0 ? 1 : -1) : nullptr;
+        snprintf(besideKey, sizeof besideKey, "%s", k ? k : "");
       } else if (drag == Drag::Move) {
         float c = carried(dx, dy);
         trans.x = c < 0 ? 0 : c > 1.05f ? 1.05f : c;
@@ -1560,19 +1639,19 @@ void touch(Touch kind, int x, int y, int64_t ms) {
         bool next = many > 1 && (dx < -60 || vx < -500), prev = many > 1 && (dx > 60 || vx > 500);
         if (next || prev) {
           int dir = next ? 1 : -1;
-          if (to == ALERT) {
-            int at = 0;
-            for (int k = 0; k < tracker.count; k++)
-              if (!strcmp(tracker.waits[k].key, alertKey)) at = k;
-            snprintf(alertKey, sizeof alertKey, "%s", tracker.waits[(at + dir + tracker.count) % tracker.count].key);
-            alertAt = nowMs;
-          } else if (const char *k = neighbour(oneKey, dir)) {
+          if (const char *k = nextPage(dir)) {
             char key[96];
             snprintf(key, sizeof key, "%s", k);
-            choose(key);
+            // The new page carries on from beside the old, which goes on out
+            snprintf(besideKey, sizeof besideKey, "%s", to == ALERT ? alertKey : oneKey);
+            if (to == ALERT) {
+              snprintf(alertKey, sizeof alertKey, "%s", key);
+              alertAt = nowMs;
+            } else {
+              choose(key);
+            }
+            slide.x += dir * PAGE;
           }
-          // The new one is already on its way in from the far side
-          slide.x += dir * float(N);
         }
         slide.v = vx / board::PITCH;
       } else if (was == Drag::Move) {
