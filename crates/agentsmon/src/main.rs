@@ -313,6 +313,18 @@ async fn run(cfg: Config) -> Result<(), String> {
             let _ = tokio::task::spawn_blocking(move || janitor::quick_pass(&hub)).await;
         }
     });
+    // A finished turn shows as unseen on the displays until the person opens
+    // its session; they look for that every few seconds.
+    let seen_hub = hub.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(3));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let hub = seen_hub.clone();
+            let _ = tokio::task::spawn_blocking(move || janitor::seen_pass(&hub)).await;
+        }
+    });
     // Retention and Claude Code's deletions, once at start and every ten
     // minutes; each pass is a few cheap queries when nothing changed.
     let janitor_hub = hub.clone();

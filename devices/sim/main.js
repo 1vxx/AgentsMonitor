@@ -257,6 +257,7 @@ const EVENTS = {
   input: () => world.ask(now(), anyWorking(), { kind: 'input', tool: 'AskUserQuestion', message: 'Fix the failing tests first, or commit what is there?' }),
   answer: () => world.list.forEach(s => world.answer(now(), s.key)),
   done: () => world.finish(now(), anyWorking(), 'answer'),
+  open: () => world.list.forEach(s => world.open(now(), s.key)),
   error: () => world.finish(now(), anyWorking(), 'error'),
   start: () => newSession(),
   stale: () => {

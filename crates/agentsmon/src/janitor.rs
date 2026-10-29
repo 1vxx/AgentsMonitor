@@ -181,6 +181,25 @@ pub fn quick_pass(hub: &Hub) -> Quick {
     quick
 }
 
+/// The seen pass, every few seconds: for the sessions whose last turn ended
+/// after the person last opened them, whether they have opened them since,
+/// as Claude Desktop records it. Nothing is read while there are none.
+pub fn seen_pass(hub: &Hub) -> usize {
+    let unseen: Vec<_> = hub.presence().into_iter().filter(|p| p.unseen && !p.ended).collect();
+    if unseen.is_empty() {
+        return 0;
+    }
+    let claude: HashSet<String> = unseen
+        .iter()
+        .filter(|p| p.agent == agentsmon_protocol::agents::CLAUDE_CODE)
+        .map(|p| p.session_id.clone())
+        .collect();
+    let opened = hub.watch.lock().desktop.opened(&claude);
+    let key = |id: &String| agentsmon_protocol::Session::key_for(agentsmon_protocol::agents::CLAUDE_CODE, id);
+    let seen: Vec<(String, i64)> = opened.iter().map(|(id, at)| (key(id), *at)).collect();
+    hub.set_seen(&seen)
+}
+
 /// Stored sessions from before titles were read (or that ended while the
 /// daemon was away) get theirs from the transcript, each looked at once.
 fn backfill_titles(hub: &Hub) {

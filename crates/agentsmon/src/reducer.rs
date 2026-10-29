@@ -31,6 +31,7 @@ pub fn new_session(agent: &str, session_id: &str, ts: i64) -> Session {
         compacting: false,
         last_turn: None,
         last_prompt: None,
+        seen_at: None,
         context: None,
         cost_usd: None,
         stats: SessionStats::default(),

@@ -28,6 +28,7 @@ struct Session {
   char waitText[400];  // the subject (a command, a path), else the message
   Outcome outcome;
   int64_t endedAt;
+  bool seen;         // the person has opened the session since its last turn ended
   uint64_t tokens;   // used so far, cache reads and writes included; 0 before any
   bool tokensExact;  // the agent's own counts rather than an estimate
   float context;     // percent of the context window in use, or -1 without a reading

@@ -81,6 +81,12 @@ export class World {
     this.touch(now, key, { status: 'idle', since: now, tool: undefined, attention: undefined, last_turn: { outcome, ended_at: now } })
   }
 
+  // The person opened the session in the app it runs in
+  open(now, key) {
+    const s = this.sessions.get(key)
+    if (s) s.seenAt = now
+  }
+
   setStale(now, key, stale) {
     const s = this.sessions.get(key)
     if (s) s.stale = stale
@@ -127,7 +133,7 @@ export class World {
           tool: isWorking(s) || isWaiting(s) ? s.tool : undefined,
           stale: s.stale || undefined,
           attention: s.attention,
-          last_turn: s.last_turn,
+          last_turn: s.last_turn && { ...s.last_turn, seen: (s.seenAt ?? 0) >= s.last_turn.ended_at || undefined },
           tokens: Math.round(s.tokensFrom + worked * TOKENS_PER_S),
           // Codex's counts read as an estimate here, to show how one looks
           tokens_exact: s.agent !== 'codex' || undefined,

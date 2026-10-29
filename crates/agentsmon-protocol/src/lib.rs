@@ -447,6 +447,10 @@ pub struct Session {
     pub last_turn: Option<LastTurn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt: Option<String>,
+    /// When the person last opened the session in the app it runs in
+    /// (Claude Desktop, the Codex app), as far as that app records it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -662,6 +666,9 @@ pub struct AttentionBrief {
 pub struct TurnBrief {
     pub outcome: TurnOutcome,
     pub ended_at: i64,
+    /// The person has opened the session since the turn ended.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub seen: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -111,6 +111,24 @@ export const SCENARIOS = [
     ],
   },
   {
+    id: 'unseen',
+    name: '完成了但还没看',
+    note: '3 秒时一个会话做完、8 秒时一个出错，你都没在看：它们一直醒着等你，单只视图优先显示，全部视图顶部写 2 DONE。30 秒时你在电脑上打开第一个，它就回去打盹。调到 30× 可以听到 5 分钟后的再次提醒。也可以随时点“在电脑上打开所有会话”。',
+    length: 600,
+    script: [
+      [0, (w, n) => {
+        w.start(n, 'claude-code:a', t('Investigate UI stutter'))
+        w.start(n, 'claude-code:b', t('Theme switch polish'))
+        w.tool(n, 'claude-code:b', 'Edit')
+        w.start(n, 'codex:c', { project: 'agentsmon-device', title: 'Firmware Wi-Fi setup', agent: 'codex' })
+        w.tool(n, 'codex:c', 'Bash')
+      }],
+      [3, (w, n) => w.finish(n, 'claude-code:a', 'answer')],
+      [8, (w, n) => w.finish(n, 'claude-code:b', 'error')],
+      [30, (w, n) => w.open(n, 'claude-code:a')],
+    ],
+  },
+  {
     id: 'legend-crowd',
     name: '传说：五个一起干活',
     note: '四个会话在工作，3 秒时第五个开始：隐藏的飞龙登场，变成最新那个会话的宠物。上滑看全部，它的名字是金色的。',

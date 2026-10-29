@@ -52,6 +52,7 @@ export interface Session {
   compacting?: boolean
   last_turn?: { outcome: TurnOutcome; ended_at: number; duration_ms?: number; preview?: string }
   last_prompt?: string
+  seen_at?: number
   context?: ContextUsage
   cost_usd?: number
   stats: {
@@ -128,7 +129,7 @@ export interface SummaryItem {
   tool?: string
   stale?: boolean
   attention?: { kind: AttentionKind; since: number; tool?: string; subject?: string; message?: string }
-  last_turn?: { outcome: TurnOutcome; ended_at: number }
+  last_turn?: { outcome: TurnOutcome; ended_at: number; seen?: boolean }
   tokens?: number
   tokens_exact?: boolean
   context?: { tokens?: number; window?: number; percent?: number }

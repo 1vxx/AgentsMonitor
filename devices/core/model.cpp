@@ -231,6 +231,7 @@ bool parse(const char *json, Summary &out) {
     if (last.type == Value::OBJ) {
       s.outcome = outcome(last["outcome"].str);
       s.endedAt = int64_t(last["ended_at"].num);
+      s.seen = last["seen"].truth;
     }
     s.tokens = uint64_t(item["tokens"].num);
     s.tokensExact = item["tokens_exact"].truth;

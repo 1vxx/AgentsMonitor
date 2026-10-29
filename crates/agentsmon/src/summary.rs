@@ -85,7 +85,11 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                     subject: a.subject.as_deref().and_then(|t| preview(t, MAX_TEXT)),
                     message: a.message.as_deref().and_then(|t| preview(t, MAX_TEXT)),
                 }),
-                last_turn: s.last_turn.as_ref().map(|t| TurnBrief { outcome: t.outcome, ended_at: t.ended_at }),
+                last_turn: s.last_turn.as_ref().map(|t| TurnBrief {
+                    outcome: t.outcome,
+                    ended_at: t.ended_at,
+                    seen: s.seen_at.is_some_and(|at| at >= t.ended_at),
+                }),
                 tokens: Some(tokens(s)).filter(|&n| n > 0),
                 tokens_exact: s.stats.exact_tokens,
                 context: s.context.clone(),
@@ -190,11 +194,17 @@ mod tests {
         apply(&mut done, 5, &Event::TurnEnd { turn_id: None, agent_id: None, outcome: TurnOutcome::Error, duration_ms: None, usage: None, preview: None });
 
         let summary = build([&asking, &done].into_iter(), &[], 10);
+        // Opened since the turn ended, it reads as seen
+        let mut opened = done.clone();
+        opened.seen_at = Some(7);
+        assert!(build([&opened].into_iter(), &[], 10).sessions[0].last_turn.as_ref().unwrap().seen);
+        opened.seen_at = Some(4);
+        assert!(!build([&opened].into_iter(), &[], 10).sessions[0].last_turn.as_ref().unwrap().seen);
         let wait = summary.sessions[0].attention.as_ref().unwrap();
         assert_eq!((wait.kind, wait.since, wait.tool.as_deref()), (AttentionKind::Permission, 2, Some("Bash")));
         let subject = wait.subject.as_deref().unwrap();
         assert!(subject.starts_with("npm run build") && subject.ends_with('…') && subject.chars().count() == MAX_TEXT);
-        assert_eq!(summary.sessions[1].last_turn, Some(TurnBrief { outcome: TurnOutcome::Error, ended_at: 5 }));
+        assert_eq!(summary.sessions[1].last_turn, Some(TurnBrief { outcome: TurnOutcome::Error, ended_at: 5, seen: false }));
     }
 
     #[test]

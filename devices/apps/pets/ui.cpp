@@ -12,6 +12,12 @@
 // finger has been away ten seconds. Swiping sideways steps through them in
 // that order; dots along the bottom show where it is.
 //
+// A finished turn stays with its pet until the person opens the session on
+// the computer (the daemon says so), starts another turn, or taps the pet:
+// it stays up smiling by a heart (or wincing under smoke), hops now and
+// then, leads ONE when nobody waits, and chimes once more after 5 minutes.
+// After an hour it settles into a nap all the same.
+//
 // The legend: five sessions at work at once, or ten turns in a row finished
 // well, turn one pet into a jade dragon for the rest of its session. It
 // arrives with a show of its own (a sweep across the sky trailing embers, a
@@ -74,6 +80,8 @@ constexpr int64_t SHIFT_MS = 3 * 60000; // anti burn-in nudge
 constexpr int64_t NAP_MS = 10 * 60000;  // all quiet this long, the board dims
 constexpr int64_t CHEER_MS = 4000;      // a finished turn's smile and heart
 constexpr int64_t NEWS_MS = 4000;       // and the line about it at the top
+constexpr int64_t UNSEEN_MS = 60 * 60000;  // a finished turn nobody opened stays this long
+constexpr int64_t NUDGE_MS = 5 * 60000;    // and chimes again once, this long after
 constexpr float MOVE_PX = 220;          // a finger this far carries a move all the way
 
 // ---------- State ----------
@@ -112,6 +120,7 @@ struct Pet {
   float shown;     // comes up as it arrives, goes as it leaves
   float phase;     // its own beat, so no two bob together
   int64_t bornAt, goneAt, endAt, pokeAt;
+  int64_t tappedEnd, nudgedEnd;  // the turn (its end) a tap on the pet saw, and the one chimed about again
   Outcome endHow;
   char label[24];  // its project, for when its session has gone
 };
@@ -316,6 +325,14 @@ int wrapTiny(const char *s, int chars, char (*out)[64], int maxLines) {
 
 enum Act { THINK, TOOL, PACK, WAIT, NAP, DONE, FAIL, DARK, GONE };
 
+// Its last turn finished, answered or failed, and nobody has opened the
+// session since, nor tapped the pet: for an hour, until someone does
+bool unseen(const Pet &p, const Session &s) {
+  bool ended = s.outcome == Outcome::Answer || s.outcome == Outcome::Error || s.outcome == Outcome::Refusal;
+  return ended && s.endedAt && !s.seen && !s.stale && p.tappedEnd != s.endedAt && wallMs - s.endedAt < UNSEEN_MS &&
+         !model::working(s.status) && !events::waiting(s);
+}
+
 Act actOf(const Pet &p, const Session *s) {
   if (p.leaving || (!s && online())) return GONE;
   if (!online() || !s || s->stale) return DARK;
@@ -330,6 +347,7 @@ Act actOf(const Pet &p, const Session *s) {
     if (p.endHow == Outcome::Answer) return DONE;
     if (p.endHow == Outcome::Error || p.endHow == Outcome::Refusal) return FAIL;
   }
+  if (unseen(p, *s)) return s->outcome == Outcome::Answer ? DONE : FAIL;
   return NAP;
 }
 
@@ -346,7 +364,7 @@ uint16_t actColor(Act a) {
 }
 
 // What a session is doing, longest first: callers take the first that fits
-int stateLines(const Session &s, char (*out)[64]) {
+int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
   char t[32], tool[48];
   if (s.stale) {
     snprintf(out[0], 64, "NO SIGNAL");
@@ -376,6 +394,17 @@ int stateLines(const Session &s, char (*out)[64]) {
       return 1;
     case Status::Compacting: snprintf(out[0], 64, "COMPACTING"); return 1;
     default: break;
+  }
+  // Not yet seen: NEW, and how long it has waited to be
+  if (fresh) {
+    int64_t m = (wallMs - s.endedAt) / 60000;
+    const char *what = s.outcome == Outcome::Answer ? "DONE" : s.outcome == Outcome::Refusal ? "REFUSED" : "FAILED";
+    if (m < 1)
+      snprintf(out[0], 64, "%s · NEW", what);
+    else
+      snprintf(out[0], 64, "%s · NEW %d%s", what, int(m < 60 ? m : m / 60), m < 60 ? "M" : "H");
+    snprintf(out[1], 64, "%s · NEW", what);
+    return 2;
   }
   age(wallMs - (s.endedAt ? s.endedAt : s.since), t, sizeof t);
   switch (s.outcome) {
@@ -495,6 +524,16 @@ const Session *focus() {
     if (s && (drag != Drag::None || nowMs - last < FOCUS_MS)) return s;
     chosenKey[0] = 0;
   }
+  if (!tracker.count) {
+    // The newest finished turn nobody has opened
+    const Session *best = nullptr;
+    for (int i = 0; i < cur.count; i++) {
+      const Session &o = cur.sessions[i];
+      const Pet *op = petOf(o.key);
+      if (op && unseen(*op, o) && (!best || o.endedAt > best->endedAt)) best = &o;
+    }
+    if (best && !(nowMs - news.at < STAR_MS && find(news.key))) return best;
+  }
   if (!tracker.count && nowMs - news.at < STAR_MS)
     if (const Session *s = find(news.key)) return s;
   return cur.count ? &cur.sessions[0] : nullptr;
@@ -584,6 +623,7 @@ void syncPets() {
     p.phase = (hash(s.key) >> 8 & 1023) / 97.f;
     p.bornAt = nowMs;
     p.endAt = p.pokeAt = -100000;
+    if (wallMs - s.endedAt >= NUDGE_MS) p.nudgedEnd = s.endedAt;  // found past its chime: none at start-up
     text::upper(s.project, p.label, sizeof p.label);
   }
 }
@@ -678,6 +718,18 @@ void step(float dt) {
   // All quiet for a while, the board dims; lost, it dims a little
   for (int i = 0; i < cur.count; i++)
     if (events::waiting(cur.sessions[i]) || model::working(cur.sessions[i].status)) busyAt = nowMs;
+  // A finished turn nobody has opened keeps the board awake, and chimes
+  // once more when it has waited 5 minutes
+  for (Pet &p : pets) {
+    if (!p.used || p.leaving) continue;
+    const Session *s = find(p.key);
+    if (!s || !unseen(p, *s)) continue;
+    busyAt = nowMs;
+    if (wallMs - s->endedAt >= NUDGE_MS && p.nudgedEnd != s->endedAt) {
+      p.nudgedEnd = s->endedAt;
+      pushCue(s->outcome == Outcome::Answer ? synth::DONE : synth::REMIND);
+    }
+  }
   float want = !online() ? 0.75f : nowMs - busyAt > NAP_MS ? 0.55f : 1;
   dimK += (want - dimK) * gfx::clamp01(dt * 1.5f);
 }
@@ -762,14 +814,20 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
     case TOOL: dy = (int(t * 7) & 1) * u; break;
     case PACK: squash = 0.72f + 0.28f * fabsf(cosf(t * 2.5f)); break;
     case WAIT: dy = -iround(fabsf(sinf(t * 5)) * 2 * u); eyes = OPEN; break;
-    case DONE:
+    case DONE: {
       eyes = SMILE;
-      if (since < 1.2f) dy = -iround(fabsf(sinf(since * 7)) * 1.5f * u);
+      // A hop as it finishes, then one every 8 s until someone looks
+      float hop = since < 1.2f ? since : fmodf(t, 8);
+      if (hop < 1.2f) dy = -iround(fabsf(sinf(hop * 7)) * 1.5f * u);
       break;
-    case FAIL:
+    }
+    case FAIL: {
       eyes = SHUT;
-      if (since < 0.8f) dx = (int(since * 22) & 1) ? u : -u;
+      // A shake as it fails, then a smaller one every 8 s
+      float shake = since < 0.8f ? since : fmodf(t, 8);
+      if (shake < 0.5f) dx = (int(shake * 22) & 1) ? u : -u;
       break;
+    }
     case NAP: eyes = SHUT, a *= 0.55f, squash = 1 - 0.05f * (0.5f + 0.5f * sinf(t * 1.3f)); break;  // breathing
     case DARK: eyes = SHUT, a *= 0.32f; break;
     case GONE:
@@ -842,13 +900,15 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
       break;
     case WAIT: board::tiny("!", float(b.x1 + u), side, amber, (0.6f + 0.4f * sinf(t * 8)) * a, u); break;
     case DONE: {
-      float rise = since < 1 ? since : 1, fade = since < 3 ? 1 : gfx::clamp01(4 - since);
-      mark(sprites::HEART, 6, b.x1 + u, side + 2 * u - iround(rise * 3 * u), u > 1 ? u - 1 : 1, pink, fade * a);
+      // The heart rises as it finishes, then stays, beating, until someone looks
+      float rise = since < 1 ? since : 1, beat = since < 3 ? 1 : 0.6f + 0.4f * sinf(t * 2.6f);
+      mark(sprites::HEART, 6, b.x1 + u, side + 2 * u - iround(rise * 3 * u), u > 1 ? u - 1 : 1, pink, beat * a);
       break;
     }
     case FAIL: {
-      float fade = since < 2.5f ? 1 : gfx::clamp01((4 - since) / 1.5f);
-      mark(sprites::PUFF, 4, b.x1 + u, side - iround(since * 1.5f * u), u, smoke, 0.8f * fade * a);
+      // The smoke rises as it fails, then hangs over its head
+      float rise = since < 2 ? since : 2, hang = since < 2.5f ? 0.8f : 0.45f + 0.25f * sinf(t * 1.7f);
+      mark(sprites::PUFF, 4, b.x1 + u, side - iround(rise * 1.5f * u), u, smoke, hang * a);
       break;
     }
     case NAP:  // Zs drifting up; smoke curling from the dragon's nostril
@@ -999,14 +1059,22 @@ void allText(float a) {
     }
   }
   if (!m) {
-    int busy = 0, nap = 0;
+    int busy = 0, nap = 0, fresh = 0;
     for (int i = 0; i < cur.count; i++) {
-      if (model::working(cur.sessions[i].status) && !cur.sessions[i].stale)
+      const Pet *op = petOf(cur.sessions[i].key);
+      if (op && unseen(*op, cur.sessions[i]))
+        fresh++;
+      else if (model::working(cur.sessions[i].status) && !cur.sessions[i].stale)
         busy++;
       else
         nap++;
     }
-    if (!n) {
+    if (fresh) {
+      // Finished turns nobody has opened come first, in green
+      snprintf(lines[m++], 64, busy ? "%d DONE · %d BUSY" : "%d DONE", fresh, busy);
+      snprintf(lines[m++], 64, "%d DONE", fresh);
+      c = green, al = 0.85f;
+    } else if (!n) {
       snprintf(lines[m++], 64, "NO SESSIONS");
     } else if (!busy) {
       snprintf(lines[m++], 64, "ALL NAPPING");
@@ -1192,7 +1260,7 @@ void oneText(float a) {
 
   // What it is doing; not connected, that first
   char opts[3][64], state[64];
-  int n = stateLines(*s, opts);
+  int n = stateLines(*s, opts, p && unseen(*p, *s));
   if (!online()) n = 1, snprintf(opts[0], 64, "%s", linkState == LOST ? "OFFLINE" : "CONNECTING...");
   pickTiny(opts, n, roomAt(79), state, sizeof state);
   board::tinyCentre(state, cx, 77, online() ? actColor(act) : dim, 0.9f * a);
@@ -1347,6 +1415,7 @@ void tap(int x, int y) {
     case ALL: {
       int i = petAt(x, y);
       if (i >= 0) {
+        if (const Session *s = find(pets[i].key)) pets[i].tappedEnd = s->endedAt;  // looked at on the display
         choose(pets[i].key);
         go(ONE);
       }
@@ -1354,7 +1423,10 @@ void tap(int x, int y) {
     }
     case ONE: {
       int i = onePetAt(x, y);
-      if (i >= 0) pets[i].pokeAt = nowMs;
+      if (i >= 0) {
+        pets[i].pokeAt = nowMs;
+        if (const Session *s = find(pets[i].key)) pets[i].tappedEnd = s->endedAt;
+      }
       break;
     }
   }

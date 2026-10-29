@@ -79,6 +79,8 @@ pub struct Presence {
     pub session_id: String,
     pub ended: bool,
     pub transcript: Option<String>,
+    /// Its last turn ended after the person last opened it.
+    pub unseen: bool,
 }
 
 /// What a collector read about a session, for [`Hub::observe`].
@@ -779,8 +781,33 @@ impl Hub {
                 session_id: s.session_id.clone(),
                 ended: s.is_ended(),
                 transcript: s.meta.transcript_path.clone(),
+                unseen: s.last_turn.as_ref().is_some_and(|t| s.seen_at.is_none_or(|at| at < t.ended_at)),
             })
             .collect()
+    }
+
+    /// When the person last opened each session, as the apps record it; later
+    /// times only. Returns how many changed.
+    pub fn set_seen(&self, seen: &[(String, i64)]) -> usize {
+        let mut st = self.state.lock();
+        let mut out = Vec::new();
+        let mut changed = 0;
+        for (key, at) in seen {
+            let Some(s) = st.sessions.get_mut(key) else { continue };
+            if s.seen_at.is_some_and(|was| was >= *at) {
+                continue;
+            }
+            s.seen_at = Some(*at);
+            out.push(Msg::Session { session: s }.out());
+            self.store.send(Op::Session(Box::new(s.clone())));
+            changed += 1;
+        }
+        if changed > 0 {
+            self.refresh_summary(&mut st, now_ms(), &mut out);
+        }
+        drop(st);
+        self.publish(out);
+        changed
     }
 
     /// Live sessions and those ended recently, most recently active first.
