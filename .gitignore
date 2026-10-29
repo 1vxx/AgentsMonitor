@@ -8,3 +8,4 @@ devices/boards/*/build/
 devices/boards/*/src/
 devices/boards/*/secrets.h
 /web/.env.local
+__pycache__/

@@ -16,6 +16,18 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8466", "--bind", "127.0.0.1", "--directory", "devices"],
       "port": 8466
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["scripts/demo.py", "--port", "7790"],
+      "port": 7790
+    },
+    {
+      "name": "dashboard-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["AGENTSMON_URL=http://127.0.0.1:7790", "AGENTSMON_TOKEN=", "pnpm", "--dir", "web", "exec", "vite", "--port", "5174", "--strictPort"],
+      "port": 5174
     }
   ]
 }
