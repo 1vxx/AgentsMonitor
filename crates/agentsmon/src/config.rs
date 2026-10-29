@@ -22,10 +22,26 @@ pub struct Config {
     pub allowed_origins: Vec<String>,
     pub db: PathBuf,
     pub retention: Retention,
-    /// How long an ended session stays in memory (and in the live view).
-    pub keep_ended_hours: u32,
+    pub live: LiveView,
     /// How Claude Code's usage limits are fetched again; `None` never.
     pub claude_refresh: Option<crate::claude::Refresh>,
+}
+
+/// Which sessions the live view holds: those at work, and for a while those
+/// that rest or ended. The rest stay in the history.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct LiveView {
+    /// How long an ended session stays in memory (and in the live view).
+    pub keep_ended_minutes: u32,
+    /// How long a session may sit idle, with nothing but heartbeats from it,
+    /// before it leaves the live view until it is used again; 0 never.
+    pub hide_idle_minutes: u32,
+}
+
+impl Default for LiveView {
+    fn default() -> LiveView {
+        LiveView { keep_ended_minutes: 30, hide_idle_minutes: 120 }
+    }
 }
 
 /// How long each kind of data lives, so the database stays bounded.
@@ -126,7 +142,23 @@ impl RetentionFile {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionsFile {
+    keep_ended_minutes: Option<u32>,
+    hide_idle_minutes: Option<u32>,
+    /// The older setting, in hours; `keep_ended_minutes` wins over it.
     keep_ended_hours: Option<u32>,
+}
+
+impl SessionsFile {
+    fn resolve(self) -> LiveView {
+        let d = LiveView::default();
+        LiveView {
+            keep_ended_minutes: self
+                .keep_ended_minutes
+                .or(self.keep_ended_hours.map(|h| h.saturating_mul(60)))
+                .unwrap_or(d.keep_ended_minutes),
+            hide_idle_minutes: self.hide_idle_minutes.unwrap_or(d.hide_idle_minutes),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -207,7 +239,7 @@ impl Config {
             allowed_origins: file.http.allowed_origins,
             db: file.store.path.map(|p| expand(&p, &home)).unwrap_or_else(|| home.join("agentsmon.db")),
             retention: file.retention.resolve(),
-            keep_ended_hours: file.sessions.keep_ended_hours.unwrap_or(24),
+            live: file.sessions.resolve(),
             claude_refresh: file.claude.resolve(&home),
             home,
         })
@@ -252,7 +284,11 @@ pub const EXAMPLE: &str = r#"# ~/.agentsmon/config.toml — every field is optio
 
 [sessions]
 # How long an ended session stays in memory and in the live view.
-# keep_ended_hours = 24
+# keep_ended_minutes = 30
+# A session still open but idle this long, with no prompt, tool or other work
+# (heartbeats do not count), leaves the live view; the history keeps it, and
+# it comes back the moment it is used. 0 keeps idle sessions in view.
+# hide_idle_minutes = 120
 
 [claude]
 # Claude Code keeps the account's usage limits as it last fetched them, which
@@ -272,6 +308,17 @@ mod tests {
     fn example_parses() {
         let file: File = toml::from_str(EXAMPLE).unwrap();
         assert!(file.http.listen.is_none());
+    }
+
+    #[test]
+    fn the_live_view_takes_minutes_and_still_the_older_hours() {
+        let live = |text: &str| toml::from_str::<File>(text).unwrap().sessions.resolve();
+        assert_eq!(live(""), LiveView { keep_ended_minutes: 30, hide_idle_minutes: 120 });
+        assert_eq!(live("[sessions]\nkeep_ended_hours = 2").keep_ended_minutes, 120);
+        assert_eq!(
+            live("[sessions]\nkeep_ended_hours = 2\nkeep_ended_minutes = 10\nhide_idle_minutes = 0"),
+            LiveView { keep_ended_minutes: 10, hide_idle_minutes: 0 }
+        );
     }
 
     #[test]

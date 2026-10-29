@@ -85,8 +85,9 @@ pub struct Profile {
 
 pub fn profile(agent: &str) -> Profile {
     match agent {
-        // The plugin beats every 20 s.
-        agents::CLAUDE_CODE => Profile { stale_after_ms: 65_000, lost_after_ms: 30 * 60_000 },
+        // The plugin beats every 20 s, as long as the session's process runs:
+        // fifteen missed beats mean it is gone.
+        agents::CLAUDE_CODE => Profile { stale_after_ms: 65_000, lost_after_ms: 5 * 60_000 },
         // Command hooks cannot beat. Codex ends a session left idle for 30 min
         // and not open in a client itself; one that crashed waits for this.
         _ => Profile { stale_after_ms: 120_000, lost_after_ms: 12 * 3_600_000 },

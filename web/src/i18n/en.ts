@@ -314,6 +314,8 @@ export const en = {
   'dm.dupes': 'Duplicate deliveries (dropped)',
   'dm.dbSize': 'Database size',
   'dm.retention': 'Retention',
+  'dm.ret.live': 'Live view: a session idle for {i} leaves it ({h} now), an ended one after {e}; History keeps both, and an idle one comes back the moment it is used',
+  'dm.ret.liveEnded': 'Live view: an ended session leaves it after {e} and stays in History',
   'dm.ret.sessions': 'Ended sessions and their events are kept {n} days',
   'dm.ret.follow': '; sessions deleted in Claude Code (in the app, or by its own cleanup) are removed within 15 seconds',
   'dm.ret.archive':

@@ -55,9 +55,11 @@ Events record only what is in flight: the main turn, running tools, subagents, a
 | | Claude Code (heartbeat every 20 s) | Codex and other agents |
 | --- | --- | --- |
 | Marked `stale` | After 65 s of silence | After 120 s of silence, only if it sends heartbeats |
-| Ended as `lost` | After 30 min of silence | After 12 h of silence |
+| Ended as `lost` | After 5 min of silence | After 12 h of silence |
 
 The sweep runs every 5 s. A gap of more than 30 s between sweeps means the machine slept; no session is judged by its silence for the next 75 s. On start, the daemon restores unfinished sessions from SQLite as `stale` until they report again.
+
+Memory, and with it the live view, holds the sessions in use. A running session that has sat `idle` for `hide_idle_minutes` (2 h) since its last change (`updated_at`, which heartbeats, usage readings and notices leave alone) leaves it, and so does one archived in Claude Desktop or Codex. The hub remembers each such session as hidden: its heartbeats and the idle reminder only keep its liveness, so it still ends as `lost` on silence, and its end goes to the store without bringing it back. Any other event revives it from the store, statistics included. An ended session leaves memory `keep_ended_minutes` (30 min) after its end. A restart applies the same rules to what it restores.
 
 ## Claude Code plugin
 
@@ -130,7 +132,7 @@ The janitor runs on two schedules.
 **Every 15 s**, over the sessions in memory (what the dashboard shows):
 
 - An ended session whose transcript no longer exists was deleted in Claude Code, or never kept one. A running session whose transcript existed and is now gone was deleted while running. Both are forgotten at once. A 24 h tombstone stops a late heartbeat or end event from recreating them; a new `session.start` may.
-- A session archived in Claude Desktop leaves memory, and therefore the live view, but stays in the store. `desktop.rs` reads `archived-sessions.idx` only when it changes and maps each local id to the Claude Code session id through `cliSessionId` in `local_<id>.json`. The format is internal to Claude Desktop: it is read-only and best effort, and anything unreadable is skipped.
+- A session archived in Claude Desktop leaves memory, and therefore the live view, but stays in the store; while it runs, it is hidden as an idle one is (see Liveness). `desktop.rs` reads `archived-sessions.idx` only when it changes and maps each local id to the Claude Code session id through `cliSessionId` in `local_<id>.json`. The format is internal to Claude Desktop: it is read-only and best effort, and anything unreadable is skipped.
 - A Codex session follows its row in Codex's thread records (`~/.codex/state_<n>.sqlite`, read-only): archived there, it leaves the live view; gone from there after it was found, it was deleted and is forgotten. Its title is the thread's `name`, the one Codex shows.
 - A session that reappears after leaving memory (unarchived, or resumed days later) is reloaded from the store, so its statistics continue.
 - Each Claude Code session takes its title from its transcript, where Claude Code writes `custom-title` (a `/rename`, or Claude Desktop's title), `ai-title` (its generated one) and `agent-name` lines. The latest of each kind counts and the kinds rank in that order. `titles.rs` reads only what each transcript gained since the last pass and parses only lines that name a title kind. Like the Desktop records, the format is internal: read-only and best effort. A stored session out of memory without a title is looked at once by the 10 min pass.

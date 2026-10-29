@@ -64,7 +64,7 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | Route | Description |
 | --- | --- |
 | `GET /v1/health` | Name, version, protocol and uptime. Never requires a token |
-| `GET /v1/snapshot` | `{server, sessions, quotas, summary}` for the sessions in memory: running ones and those ended in the last 24 h |
+| `GET /v1/snapshot` | `{server, sessions, quotas, summary}` for the sessions in memory: running ones not idle for 2 h, and those ended in the last 30 min (both under `[sessions]` in the config) |
 | `GET /v1/summary` | The compact summary for display devices |
 | `GET /v1/sessions` | `scope=live` (default) returns sessions in memory; `scope=all` pages through the store. Also `agent`, `limit` (default 100, max 1,000) and `offset` |
 | `GET /v1/sessions/{key}` | One session, from memory or the store |
@@ -91,7 +91,7 @@ The first message is always a `snapshot`; changes follow. Add `?feed=1` to also 
 | --- | --- |
 | `snapshot` | As `GET /v1/snapshot` |
 | `session` | `{session}`: a session that was created or changed, in full |
-| `session.removed` | `{key}`: a session left memory (forgotten, archived, or ended more than 24 h ago) |
+| `session.removed` | `{key}`: a session left memory (forgotten, archived, idle for 2 h, or ended more than 30 min ago) |
 | `quota` | `{quota}` |
 | `summary` | `{summary}`, only when it changed |
 | `tokens` | `{ts, added}`: model requests were counted. Clients refresh their token windows |

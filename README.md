@@ -275,7 +275,9 @@ The status is derived from what is in flight, never set directly, so a lost or r
 | `idle` | Waiting for the next prompt; `last_turn` records how the last turn ended |
 | `ended` | The session has ended |
 
-The Claude Code plugin sends a heartbeat every 20 s: a Claude Code session silent for 65 s is marked `stale`, and after 30 min it ends as `lost`. Codex's command hooks cannot send heartbeats, so a Codex session is never marked `stale` for silence and ends as `lost` after 12 h. After the machine wakes from sleep, sessions get 75 s to report in before silence counts.
+The Claude Code plugin sends a heartbeat every 20 s: a Claude Code session silent for 65 s is marked `stale`, and after 5 min it ends as `lost`. Codex's command hooks cannot send heartbeats, so a Codex session is never marked `stale` for silence and ends as `lost` after 12 h. After the machine wakes from sleep, sessions get 75 s to report in before silence counts.
+
+The live view is for the sessions in use. A session still open but idle for 2 h (no prompt, tool or other work; heartbeats do not count) leaves it, and an ended one leaves it after 30 min. Both stay in History, and an idle one comes back with its statistics the moment it is used again. Both periods are under `[sessions]` in the config file.
 
 ## Data retention
 
@@ -313,7 +315,7 @@ The monitor must never slow an agent down:
 
 - Plugin hooks only queue an event and return. A timer sends events in ordered batches after the hook completes; one round trip over the socket takes about 70 µs. While the daemon is down, events wait in a bounded queue (1,000) and go out in order once it is back.
 - The daemon runs on one thread. Each event is a microsecond-scale reducer step. Every change is serialized once and shared by all WebSocket clients, and SQLite writes are batched on a separate thread. Measured: 7.4 MB resident memory and 0.27 s total CPU after 2,300 batches.
-- Memory is bounded: live sessions plus those ended in the last 24 h, and at most 50,000 request ids (6 h) for deduplication.
+- Memory is bounded: sessions in the live view (running ones not idle for 2 h, and those ended in the last 30 min), and at most 50,000 request ids (6 h) for deduplication.
 - `agentsmon hook`, which the Codex plugin and other command-hook agents use, forwards stdin without parsing it or starting an async runtime: about 5 ms per event, mostly process start-up.
 - Claude Code's transcripts and Codex's session logs are read every 2 s, only what each file gained, and only lines that name a reply, a token or a session record are parsed. Files not written to for a day are looked at once a minute, and a folder is listed again only when it changed. Files are read through a 64 KB buffer, so memory does not grow with them. Measured with 730 transcripts (845 MB): the first run counts their 12,000 requests in 0.9 s of CPU with a 26 MB peak; after that, reading them costs about 20 ms of CPU a minute.
 

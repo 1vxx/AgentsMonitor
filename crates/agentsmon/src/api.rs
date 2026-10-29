@@ -387,9 +387,11 @@ async fn stats(State(api): State<Api>) -> Response {
         "ws_clients": m.ws_clients.load(Ordering::Relaxed),
         "sessions_in_memory": api.hub.sessions().len(),
         "sessions_live": api.hub.live_count(),
+        "sessions_hidden": api.hub.hidden_count(),
         "db": db,
         "db_bytes": api.hub.store().disk_bytes(),
         "retention": api.hub.retention,
+        "live": api.hub.live,
         "rss_bytes": crate::sys::rss_bytes(),
         "cpu_ms": crate::sys::cpu_ms(),
     }))

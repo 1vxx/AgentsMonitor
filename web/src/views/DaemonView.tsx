@@ -16,6 +16,9 @@ const Stat = ({ label, value, i }: { label: string; value: ReactNode; i: number 
 
 const Count = ({ v }: { v: number }) => <Numeral value={v} format={n => compact(Math.round(n))} />
 
+/** A setting in minutes, as `30m` or `2h`. */
+const span = (minutes: number) => duration(minutes * 60_000).replace(/ 0+[sm]$/, '')
+
 const summarize = (r: MaintenanceReport) => {
   const parts: string[] = []
   if (r.forgotten > 0) {
@@ -148,6 +151,15 @@ export const DaemonView = () => {
             <h3 className="section-title section-title-sm">{t('dm.retention')}</h3>
           </div>
           <ul>
+            {stats.live && (
+              <li>
+                {t(stats.live.hide_idle_minutes > 0 ? 'dm.ret.live' : 'dm.ret.liveEnded', {
+                  i: span(stats.live.hide_idle_minutes),
+                  e: span(stats.live.keep_ended_minutes),
+                  h: stats.sessions_hidden ?? 0,
+                })}
+              </li>
+            )}
             <li>
               {t('dm.ret.sessions', { n: stats.retention.sessions_days })}
               {stats.retention.follow_transcripts && t('dm.ret.follow')}
@@ -163,7 +175,10 @@ export const DaemonView = () => {
             </li>
             <li>{t('dm.ret.sweep')}</li>
           </ul>
-          <Cleanup ended={Math.max(0, (stats.db?.sessions ?? 0) - stats.sessions_live)} onDone={() => void refresh()} />
+          <Cleanup
+            ended={Math.max(0, (stats.db?.sessions ?? 0) - stats.sessions_live - (stats.sessions_hidden ?? 0))}
+            onDone={() => void refresh()}
+          />
         </motion.section>
       )}
     </div>

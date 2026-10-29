@@ -306,7 +306,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("agentsmon-janitor-run-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), 24, Retention::default());
+        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
         let env = |json: &str| serde_json::from_str::<agentsmon_protocol::Envelope>(json).unwrap();
         hub.ingest(vec![
             env(r#"{"agent":"claude-code","sid":"live","type":"prompt"}"#),
@@ -326,7 +326,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("agentsmon-quick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), 24, Retention::default());
+        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
         // A Claude Desktop that archived the session "archived".
         let folder = dir.join("desktop").join("acct").join("org");
         std::fs::create_dir_all(&folder).unwrap();

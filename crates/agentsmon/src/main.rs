@@ -204,7 +204,7 @@ async fn run(cfg: Config) -> Result<(), String> {
     let _ = std::fs::set_permissions(&cfg.home, std::fs::Permissions::from_mode(0o700));
 
     let store = Store::open(&cfg.db).map_err(|e| format!("{}: {e}", cfg.db.display()))?;
-    let hub = Arc::new(Hub::new(store.clone(), cfg.keep_ended_hours, cfg.retention));
+    let hub = Arc::new(Hub::new(store.clone(), cfg.live, cfg.retention));
     let app = api::router(hub.clone());
 
     // The socket: refuse to start beside a running daemon, clear a dead one's.

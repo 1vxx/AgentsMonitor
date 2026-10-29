@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use agentsmon_protocol::{
-    ContextUsage, Envelope, Event, EventRecord, PROTOCOL_VERSION, Quota, QuotaSample, RateWindow, ServerInfo, Session,
-    SessionMeta, Snapshot, Summary, TokenTotals, UsageRecord,
+    AttentionKind, ContextUsage, Envelope, Event, EventRecord, PROTOCOL_VERSION, Quota, QuotaSample, RateWindow,
+    ServerInfo, Session, SessionMeta, Snapshot, Status, Summary, TokenTotals, UsageRecord,
 };
 use axum::extract::ws::Utf8Bytes;
 use parking_lot::Mutex;
@@ -17,7 +17,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::adapters;
-use crate::config::Retention;
+use crate::config::{LiveView, Retention};
 use crate::janitor;
 use crate::reducer;
 use crate::store::{self, Op, Store};
@@ -116,6 +116,31 @@ struct State {
     /// Sessions forgotten lately, and when: their stragglers (a last
     /// heartbeat, an end) must not bring them back. A new start may.
     forgotten: HashMap<String, i64>,
+    /// Running sessions out of the live view (idle too long, or archived):
+    /// only work brings one back. Heartbeats only keep it from going lost.
+    hidden: HashMap<String, Hidden>,
+}
+
+struct Hidden {
+    agent: String,
+    session_id: String,
+    last_seen: i64,
+}
+
+/// Whether an event is the session at work again, which brings a hidden one
+/// back. Heartbeats, readings, notices and the idle reminder are not; an end
+/// is recorded without bringing it back.
+fn wakes(event: &Event) -> bool {
+    !event.is_ephemeral()
+        && !matches!(
+            event,
+            Event::Notice { .. } | Event::SessionEnd { .. } | Event::Attention { kind: AttentionKind::Idle, .. }
+        )
+}
+
+/// A running session at rest for longer than the live view keeps one.
+fn idle_too_long(s: &Session, now: i64, hide_idle_ms: i64) -> bool {
+    hide_idle_ms > 0 && !s.is_ended() && s.status == Status::Idle && now - s.updated_at > hide_idle_ms
 }
 
 /// How long a forgotten session's stragglers are turned away.
@@ -149,6 +174,18 @@ impl State {
             self.sessions.insert(key.clone(), s);
         }
         self.sessions.get_mut(&key).expect("just inserted")
+    }
+
+    /// Takes a session out of memory, and so out of the live view. A running
+    /// one is remembered as hidden, so its heartbeats do not bring it back.
+    fn hide(&mut self, key: &str, out: &mut Vec<Outbound>) -> bool {
+        let Some(s) = self.sessions.remove(key) else { return false };
+        self.heartbeats.remove(key);
+        if !s.is_ended() {
+            self.hidden.insert(key.to_string(), Hidden { agent: s.agent, session_id: s.session_id, last_seen: s.last_seen });
+        }
+        out.push(Msg::SessionRemoved { key }.out());
+        true
     }
 
     fn remember(&mut self, request_id: &str, now: i64) -> bool {
@@ -201,6 +238,8 @@ pub struct Hub {
     pub info: ServerInfo,
     pub metrics: Metrics,
     keep_ended_ms: i64,
+    hide_idle_ms: i64,
+    pub live: LiveView,
     pub retention: Retention,
     /// Held while a cleanup pass runs, so two never overlap.
     pub janitor: Mutex<()>,
@@ -209,18 +248,23 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn new(store: Store, keep_ended_hours: u32, retention: Retention) -> Hub {
+    pub fn new(store: Store, live: LiveView, retention: Retention) -> Hub {
         let now = now_ms();
-        let keep_ended_ms = keep_ended_hours as i64 * 3_600_000;
-        let mut sessions: HashMap<String, Session> = store
-            .read(|c| store::live_sessions(c, now - keep_ended_ms))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| (s.key.clone(), s))
-            .collect();
-        // Nothing is known about them until they speak again.
-        for s in sessions.values_mut().filter(|s| !s.is_ended()) {
-            s.stale = true;
+        let keep_ended_ms = live.keep_ended_minutes as i64 * 60_000;
+        let hide_idle_ms = live.hide_idle_minutes as i64 * 60_000;
+        let mut sessions: HashMap<String, Session> = HashMap::new();
+        let mut hidden: HashMap<String, Hidden> = HashMap::new();
+        for mut s in store.read(|c| store::live_sessions(c, now - keep_ended_ms)).unwrap_or_default() {
+            if idle_too_long(&s, now, hide_idle_ms) {
+                let h = Hidden { agent: s.agent, session_id: s.session_id, last_seen: s.last_seen };
+                hidden.insert(s.key, h);
+                continue;
+            }
+            // Nothing is known about them until they speak again.
+            if !s.is_ended() {
+                s.stale = true;
+            }
+            sessions.insert(s.key.clone(), s);
         }
         let quotas: BTreeMap<String, Quota> =
             store.read(store::quotas).unwrap_or_default().into_iter().map(|q| (q.agent.clone(), q)).collect();
@@ -249,6 +293,7 @@ impl Hub {
                 seen_order,
                 pending_usage: HashMap::new(),
                 forgotten: HashMap::new(),
+                hidden,
             }),
             otlp_services: Mutex::new(BTreeSet::new()),
             tx,
@@ -261,6 +306,8 @@ impl Hub {
             },
             metrics: Metrics::default(),
             keep_ended_ms,
+            hide_idle_ms,
+            live,
             retention,
             janitor: Mutex::new(()),
             watch: Mutex::new(janitor::Watch::default()),
@@ -302,7 +349,11 @@ impl Hub {
                         // Metadata rides along as a heartbeat-free merge.
                         if !n.meta.is_empty() && !n.sid.is_empty() && n.sid.len() <= 128 {
                             let key = Session::key_for(&env.agent, &n.sid);
-                            if !st.forgotten.contains_key(&key) {
+                            // A hidden session takes it only when it comes back.
+                            if n.events.iter().any(wakes) {
+                                st.hidden.remove(&key);
+                            }
+                            if !st.forgotten.contains_key(&key) && !st.hidden.contains_key(&key) {
                                 let s = st.session_entry(&self.store, &env.agent, &n.sid, ts);
                                 if s.meta.merge(&n.meta) && !changed.contains(&key) {
                                     changed.push(key);
@@ -368,6 +419,26 @@ impl Hub {
             }
             st.forgotten.remove(&key);
         }
+        // Out of the live view: work brings it back, its end goes to the
+        // history alone, and anything else only says it still runs.
+        let mut ends_hidden = false;
+        if st.hidden.contains_key(&key) {
+            if matches!(event, Event::SessionEnd { .. }) {
+                ends_hidden = true;
+            } else if !wakes(&event) {
+                if let Some(h) = st.hidden.get_mut(&key) {
+                    h.last_seen = h.last_seen.max(ts);
+                }
+                if let Event::Usage { rate_limits: Some(windows), .. } = &event {
+                    self.note_quota(st, agent, &key, ts, windows, out);
+                }
+                if !event.is_ephemeral() {
+                    self.record(st, ts, key, agent, event, out);
+                }
+                return;
+            }
+            st.hidden.remove(&key);
+        }
         if matches!(event, Event::Heartbeat { .. }) {
             st.heartbeats.insert(key.clone(), ts);
         }
@@ -380,7 +451,13 @@ impl Hub {
             s.meta.project = Some(project_name(cwd));
             moved = true;
         }
-        if moved && !changed.contains(&key) {
+        if ends_hidden {
+            // Stored as ended; the live view had let it go already.
+            if let Some(s) = st.sessions.remove(&key) {
+                self.store.send(Op::Session(Box::new(s)));
+            }
+            changed.retain(|k| k != &key);
+        } else if moved && !changed.contains(&key) {
             changed.push(key.clone());
         }
 
@@ -389,11 +466,16 @@ impl Hub {
         }
 
         if !event.is_ephemeral() {
-            st.seq += 1;
-            let record = EventRecord { seq: st.seq, ts, key, agent: agent.to_string(), event };
-            out.push(Msg::Event { record: &record }.out());
-            self.store.send(Op::Event(record));
+            self.record(st, ts, key, agent, event, out);
         }
+    }
+
+    /// Adds an event to the history and the event feed.
+    fn record(&self, st: &mut State, ts: i64, key: String, agent: &str, event: Event, out: &mut Vec<Outbound>) {
+        st.seq += 1;
+        let record = EventRecord { seq: st.seq, ts, key, agent: agent.to_string(), event };
+        out.push(Msg::Event { record: &record }.out());
+        self.store.send(Op::Event(record));
     }
 
     /// Files an account's rate-limit reading, as `source` (a session key) saw it.
@@ -550,8 +632,9 @@ impl Hub {
         fresh
     }
 
-    /// Marks silent sessions stale, ends the ones long gone, and forgets
-    /// sessions that ended long enough ago. Runs every few seconds.
+    /// Marks silent sessions stale, ends the ones long gone (hidden ones
+    /// too), hides the ones idle too long, and forgets sessions that ended
+    /// long enough ago. Runs every few seconds.
     pub fn sweep(&self) {
         self.sweep_at(now_ms());
     }
@@ -565,8 +648,11 @@ impl Hub {
         st.last_sweep = now;
         let judge = now >= st.grace_until;
         let mut lost = Vec::new();
-        let State { sessions, heartbeats, .. } = &mut *st;
+        let State { sessions, heartbeats, hidden, .. } = &mut *st;
 
+        for h in hidden.values().filter(|h| judge && now - h.last_seen > adapters::profile(&h.agent).lost_after_ms) {
+            lost.push((h.agent.clone(), h.session_id.clone()));
+        }
         for s in sessions.values_mut().filter(|s| judge && !s.is_ended()) {
             let profile = adapters::profile(&s.agent);
             let silent = now - s.last_seen;
@@ -588,6 +674,12 @@ impl Hub {
                 out.push(Msg::Session { session: s }.out());
                 self.store.send(Op::Session(Box::new(s.clone())));
             }
+        }
+
+        let idle: Vec<String> =
+            st.sessions.values().filter(|s| idle_too_long(s, now, self.hide_idle_ms)).map(|s| s.key.clone()).collect();
+        for key in idle {
+            st.hide(&key, &mut out);
         }
 
         st.forgotten.retain(|_, at| now - *at < TOMBSTONE_MS);
@@ -622,6 +714,7 @@ impl Hub {
                 known += 1;
             }
             st.heartbeats.remove(key);
+            st.hidden.remove(key);
             st.forgotten.insert(key.clone(), now);
             out.push(Msg::SessionRemoved { key }.out());
         }
@@ -635,16 +728,15 @@ impl Hub {
     }
 
     /// Takes sessions out of the live view (memory) and keeps them in the
-    /// store: the history still has them, and they come back if they go on.
+    /// store: the history still has them, and they come back if they go on
+    /// (heartbeats alone do not).
     pub fn hide_many(&self, keys: &[String]) -> usize {
         let mut st = self.state.lock();
         let mut out = Vec::new();
         let mut hidden = 0;
         for key in keys {
-            if st.sessions.remove(key).is_some() {
+            if st.hide(key, &mut out) {
                 hidden += 1;
-                st.heartbeats.remove(key);
-                out.push(Msg::SessionRemoved { key }.out());
             }
         }
         self.refresh_summary(&mut st, now_ms(), &mut out);
@@ -730,6 +822,11 @@ impl Hub {
     pub fn live_count(&self) -> usize {
         self.state.lock().sessions.values().filter(|s| !s.is_ended()).count()
     }
+
+    /// Running sessions out of the live view, idle or archived.
+    pub fn hidden_count(&self) -> usize {
+        self.state.lock().hidden.len()
+    }
 }
 
 #[cfg(test)]
@@ -741,7 +838,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("agentsmon-hub-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        (Hub::new(Store::open(&dir.join("t.db")).unwrap(), 24, Retention::default()), dir)
+        (Hub::new(Store::open(&dir.join("t.db")).unwrap(), LiveView::default(), Retention::default()), dir)
     }
 
     fn env(json: &str) -> Envelope {
@@ -1002,6 +1099,88 @@ mod tests {
         // Unarchived and resumed: the two earlier prompts are still counted.
         hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"r","type":"prompt"}"#)]);
         assert_eq!(hub.session("claude-code:r").unwrap().stats.prompts, 3);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn idle_sessions_leave_the_live_view_until_they_work_again() {
+        let (hub, dir) = hub("idle");
+        let now = now_ms();
+        let idle = now - 3 * 3_600_000;
+        let at = |sid: &str, ts: i64, rest: &str| env(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{ts},{rest}}}"#));
+        hub.ingest(vec![
+            at("old", idle, r#""type":"prompt""#),
+            at("asking", idle, r#""type":"attention","kind":"permission","tool":"Bash""#),
+            at("recent", now - 60_000, r#""type":"prompt""#),
+        ]);
+        hub.ingest(vec![
+            at("old", now, r#""type":"heartbeat","busy":false"#),
+            at("asking", now, r#""type":"heartbeat","busy":true"#),
+        ]);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        hub.sweep_at(now);
+        // Waiting on a person, or used lately: still in view.
+        assert!(hub.session("claude-code:asking").is_some());
+        assert!(hub.session("claude-code:recent").is_some());
+        assert!(hub.session("claude-code:old").is_none());
+        assert_eq!(hub.hidden_count(), 1);
+
+        // Its heartbeats and the idle reminder do not bring it back...
+        hub.ingest(vec![
+            at("old", now, r#""type":"heartbeat","busy":false"#),
+            at("old", now, r#""type":"attention","kind":"idle""#),
+        ]);
+        assert!(hub.session("claude-code:old").is_none());
+        // ...a prompt does, with what it had.
+        hub.ingest(vec![at("old", now, r#""type":"prompt""#)]);
+        assert_eq!(hub.session("claude-code:old").unwrap().stats.prompts, 2);
+        assert_eq!(hub.hidden_count(), 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_hidden_session_ends_in_the_history_only() {
+        let (hub, dir) = hub("hidden-end");
+        let now = now_ms();
+        let idle = now - 3 * 3_600_000;
+        for sid in ["closed", "crashed"] {
+            hub.ingest(vec![env(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{idle},"type":"prompt"}}"#))]);
+        }
+        hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"closed","type":"heartbeat"}"#)]);
+        hub.sweep_at(now);
+        assert_eq!(hub.hidden_count(), 2);
+
+        hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"closed","type":"session.end","reason":"other"}"#)]);
+        // No beat from the other since it went quiet: once the start's grace
+        // is over, it went lost, still out of view.
+        let mut t = now;
+        while t <= now + WAKE_GRACE_MS {
+            t += 5_000;
+            hub.sweep_at(t);
+        }
+        assert!(hub.sessions().is_empty());
+        assert_eq!(hub.hidden_count(), 0);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        let stored = |key: &str| hub.store().read(|c| store::session(c, key)).unwrap().unwrap();
+        assert_eq!(stored("claude-code:closed").end_reason.as_deref(), Some("other"));
+        assert_eq!(stored("claude-code:crashed").end_reason.as_deref(), Some("lost"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_restart_keeps_idle_sessions_out_of_view() {
+        let (hub, dir) = hub("idle-restart");
+        let idle = now_ms() - 3 * 3_600_000;
+        hub.ingest(vec![
+            env(&format!(r#"{{"agent":"claude-code","sid":"old","ts":{idle},"type":"prompt"}}"#)),
+            env(r#"{"agent":"claude-code","sid":"new","type":"prompt"}"#),
+        ]);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        drop(hub);
+        let again = Hub::new(Store::open(&dir.join("t.db")).unwrap(), LiveView::default(), Retention::default());
+        let keys: Vec<String> = again.sessions().into_iter().map(|s| s.key).collect();
+        assert_eq!(keys, vec!["claude-code:new".to_string()]);
+        assert_eq!(again.hidden_count(), 1);
         std::fs::remove_dir_all(dir).ok();
     }
 }

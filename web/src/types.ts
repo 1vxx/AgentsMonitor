@@ -208,9 +208,13 @@ export interface DaemonStats {
     token_hourly_days: number
     token_daily_days: number
   }
+  /** What the live view holds; 0 idle minutes keeps idle sessions in it. */
+  live?: { keep_ended_minutes: number; hide_idle_minutes: number }
   ws_clients: number
   sessions_in_memory: number
   sessions_live: number
+  /** Running sessions out of the live view: idle too long, or archived. */
+  sessions_hidden?: number
   db?: { sessions: number; events: number; quota_samples: number; token_requests?: number }
   rss_bytes?: number
   cpu_ms?: number

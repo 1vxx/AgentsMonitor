@@ -309,6 +309,8 @@ export const zh: Record<Key, Message> = {
   'dm.dupes': '重复投递（已去重）',
   'dm.dbSize': '数据库大小',
   'dm.retention': '数据保留',
+  'dm.ret.live': '实时视图：空闲 {i} 的会话移出（当前 {h} 个），已结束的会话 {e} 后移出；两者都留在历史页，空闲的会话一被使用就回来',
+  'dm.ret.liveEnded': '实时视图：已结束的会话 {e} 后移出，历史页仍可查看',
   'dm.ret.sessions': '已结束的会话及其事件保留 {n} 天',
   'dm.ret.follow': '；在 Claude Code 里删除的会话（App 里删除，或自动清理）15 秒内同步删除',
   'dm.ret.archive': '在 Claude 桌面 App 里归档的会话 15 秒内移出实时视图（含"最近结束"），历史页仍可查看；取消归档后继续使用会带着原来的统计回来',
