@@ -783,10 +783,10 @@ void alertBack(float a) {
   float breath = 0.82f + 0.18f * sinf(t * gfx::TAU / 2.4f);
   // Amber light rising toward the rim, a fine ring, and a comet running round it
   gfx::vignette(150, 233, amber, 0.34f * a * breath);
-  gfx::ring(224, 1.4f, amber, 0.45f * a);
+  gfx::ring(231, 1.4f, amber, 0.45f * a);
   float head = t / 3.2f;
-  gfx::arc(224, 3.6f, head - 0.24f, head, amber, 0, 0.95f * a);
-  float hx = 233 + sinf(head * gfx::TAU) * 224, hy = 233 - cosf(head * gfx::TAU) * 224;
+  gfx::arc(231, 3.6f, head - 0.24f, head, amber, 0, 0.95f * a);
+  float hx = 233 + sinf(head * gfx::TAU) * 231, hy = 233 - cosf(head * gfx::TAU) * 231;
   gfx::glowAt(hx, hy, 18, amber, 0.7f * a);
   gfx::discAt(hx, hy, 2.6f, gfx::c565(hex(0xfff2d6)), a);
 }

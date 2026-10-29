@@ -524,7 +524,7 @@ void stars(float seconds, float alpha) {
       seed = seed * 1664525u + 1013904223u;
       return (seed >> 8) / 16777216.f;
     };
-    for (Star &s : sky) s = {rnd(), 26 + 200 * sqrtf(rnd()), 0.1f + 0.5f * rnd() * rnd(), 0.06f + 0.22f * rnd(), rnd()};
+    for (Star &s : sky) s = {rnd(), 26 + 206 * sqrtf(rnd()), 0.1f + 0.5f * rnd() * rnd(), 0.06f + 0.22f * rnd(), rnd()};
     made = true;
   }
   float turn = seconds / 1200;

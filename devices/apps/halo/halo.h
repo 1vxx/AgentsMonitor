@@ -10,8 +10,8 @@ namespace halo {
 
 // Where the home screen's orb sits: above centre, leaving room for two lines
 constexpr float OX = 233, OY = 180, ORB_R = 86;
-constexpr float R_TRACK = 200;  // the satellites' orbit, round the panel's centre
-constexpr float R_TICK = 210;   // the scale grows outward from here
+constexpr float R_TRACK = 210;  // the satellites' orbit, round the panel's centre
+constexpr float R_TICK = 220;   // the scale grows outward from here, its longest ticks to the edge
 
 struct Palette {
   gfx::RGB m1, m2, m3;
