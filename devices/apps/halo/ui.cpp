@@ -25,6 +25,7 @@
 
 #include <atomic>
 
+#include "events.h"
 #include "gfx.h"
 #include "halo.h"
 #include "model.h"
@@ -117,14 +118,9 @@ struct Sat {
 };
 Sat sats[model::MAX];
 
-struct Waiting {
-  char key[96];
-  int64_t since;
-  int reminded;
-  bool acked;
-};
-Waiting waits[model::MAX];
-int waitCount;
+events::Tracker tracker;
+events::Wait *const waits = tracker.waits;
+int &waitCount = tracker.count;
 int64_t alertUntil, alertAt;
 
 int cues[8], cueHead, cueTail;
@@ -174,20 +170,14 @@ void choose(const char *key) {
   focusAt = nowMs;
 }
 
-const Session *find(const model::Summary &sum, const char *key) {
-  for (int i = 0; i < sum.count; i++)
-    if (!strcmp(sum.sessions[i].key, key)) return &sum.sessions[i];
-  return nullptr;
-}
-
 int indexOf(const char *key) {
   for (int i = 0; i < cur.count; i++)
     if (!strcmp(cur.sessions[i].key, key)) return i;
   return -1;
 }
 
-bool isWaiting(const Session &s) { return model::waiting(s.status) && !s.stale; }
-int64_t waitSince(const Session &s) { return s.waitSince ? s.waitSince : s.since; }
+using events::waitSince;
+bool isWaiting(const Session &s) { return events::waiting(s); }
 
 Tone tone(const Session &s) {
   if (s.stale) return MUTED;
@@ -428,58 +418,37 @@ Anchor anchor(Screen s) {
 // ---------- Following the summaries ----------
 
 void follow(const model::Summary &next) {
-  bool first = !haveSummary;
-  for (int i = 0; i < next.count; i++) {
-    const Session &s = next.sessions[i];
-    const Session *p = first ? nullptr : find(cur, s.key);
-    // A new wait, or a new question while still waiting
-    if (isWaiting(s) && !(p && isWaiting(*p) && waitSince(*p) == waitSince(s))) {
-      Waiting *w = nullptr;
-      for (int k = 0; k < waitCount; k++)
-        if (!strcmp(waits[k].key, s.key)) w = &waits[k];
-      if (!w && waitCount < model::MAX) w = &waits[waitCount++];
-      if (w) {
-        snprintf(w->key, sizeof w->key, "%s", s.key);
-        w->since = waitSince(s);
-        w->reminded = 0;
-        w->acked = first;  // waits found at start-up don't call out
-      }
-      if (!first) {
-        pushCue(synth::ATTENTION);
-        alertUntil = nowMs + TAKEOVER_MS;
-        alertAt = nowMs;
-        choose(s.key);
-        drag = Drag::None;
-        go(ALERT);
-      }
-    }
-    // A turn that ended
-    if (p && s.endedAt && s.endedAt != p->endedAt && !isWaiting(s)) {
-      bool failed = s.outcome == Outcome::Error || s.outcome == Outcome::Refusal;
-      if (s.outcome == Outcome::Answer || failed) pushCue(failed ? synth::ERROR : synth::DONE);
+  events::Event evs[2 * model::MAX];
+  int n = tracker.follow(haveSummary ? &cur : nullptr, next, evs, 2 * model::MAX);
+  for (int k = 0; k < n; k++) {
+    const events::Event &e = evs[k];
+    if (e.kind == events::WAIT) {
+      pushCue(synth::ATTENTION);
+      alertUntil = nowMs + TAKEOVER_MS;
+      alertAt = nowMs;
+      choose(e.key);
+      drag = Drag::None;
+      go(ALERT);
+    } else if (e.kind == events::END) {
+      bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
+      if (e.outcome == Outcome::Answer || failed) pushCue(failed ? synth::ERROR : synth::DONE);
       for (Sat &sat : sats)
-        if (sat.used && !strcmp(sat.key, s.key)) {
+        if (sat.used && !strcmp(sat.key, e.key)) {
           sat.flashAt = nowMs;
           sat.flashColor = TONE_COLORS[failed ? CRITICAL : GOOD];
         }
-      if (s.outcome == Outcome::Answer || failed) {
+      if (e.outcome == Outcome::Answer || failed) {
         (failed ? winceAt : cheerAt) = nowMs;
         // Show which one finished, unless someone is waiting for you
         bool anyWait = false;
-        for (int k = 0; k < next.count; k++) anyWait |= isWaiting(next.sessions[k]);
-        if (!anyWait) choose(s.key);
+        for (int i = 0; i < next.count; i++) anyWait |= isWaiting(next.sessions[i]);
+        if (!anyWait) choose(e.key);
       }
     }
   }
   cur = next;
   haveSummary = true;
-  // Waits that ended
-  int keep = 0;
-  for (int k = 0; k < waitCount; k++) {
-    int i = indexOf(waits[k].key);
-    if (i >= 0 && isWaiting(cur.sessions[i])) waits[keep++] = waits[k];
-  }
-  waitCount = keep;
+  tracker.prune(cur);
   if (!waitCount && to == ALERT) go(HOME);
 }
 
@@ -553,20 +522,15 @@ void step(float dt) {
     sat.focus += ((chosen ? 1 : 0) - sat.focus) * gfx::clamp01(dt * 8);
   }
 
-  // Reminders for waits nobody has answered: at 2 and 5 minutes, then every 10
-  for (int k = 0; k < waitCount; k++) {
-    Waiting &w = waits[k];
-    if (w.acked) continue;
-    int64_t due = w.reminded == 0 ? 120000 : 300000 + int64_t(w.reminded - 1) * 600000;
-    if (wallMs - w.since >= due) {
-      w.reminded++;
-      pushCue(synth::REMIND);
-      for (Sat &sat : sats)
-        if (sat.used && !strcmp(sat.key, w.key)) {
-          sat.flashAt = nowMs;
-          sat.flashColor = TONE_COLORS[ATTN];
-        }
-    }
+  // Reminders for waits nobody has answered
+  events::Event due[model::MAX];
+  for (int k = 0, n = tracker.remind(wallMs, due, model::MAX); k < n; k++) {
+    pushCue(synth::REMIND);
+    for (Sat &sat : sats)
+      if (sat.used && !strcmp(sat.key, due[k].key)) {
+        sat.flashAt = nowMs;
+        sat.flashColor = TONE_COLORS[ATTN];
+      }
   }
 
   // The move between screens, unless a finger holds it
@@ -1113,7 +1077,7 @@ void compose() {
 void tap(int y) {
   pressTapped = true;
   // Any tap answers the reminders of the waits on screen
-  for (int k = 0; k < waitCount; k++) waits[k].acked = true;
+  tracker.ack();
   switch (to) {
     case ALERT:
       alertUntil = nowMs;
@@ -1178,7 +1142,7 @@ void decide(int dx, int dy) {
       break;
     case ALERT:
       d = Drag::Move, target = HOME;
-      for (int k = 0; k < waitCount; k++) waits[k].acked = true;
+      tracker.ack();
       break;
   }
   drag = d;
@@ -1199,7 +1163,7 @@ void link(Link state) {
   if (state != ONLINE) {
     // Nothing on screen is current any more
     haveSummary = false;
-    waitCount = 0;
+    tracker.clear();
     focusKey[0] = 0;
     drag = Drag::None;
     go(HOME);
