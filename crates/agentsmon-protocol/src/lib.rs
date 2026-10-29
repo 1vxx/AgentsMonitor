@@ -633,6 +633,16 @@ pub struct SummaryItem {
     /// How its last turn ended, so a display can tell a finish from a failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn: Option<TurnBrief>,
+    /// Tokens it has used, cache reads and writes included, as the dashboard
+    /// counts them; absent before the first is counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    /// `tokens` are the agent's own per-request counts, not summed from turn ends.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tokens_exact: bool,
+    /// How full its context window was at the last reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextUsage>,
 }
 
 /// [`Attention`] with its texts cut to fit a small screen.

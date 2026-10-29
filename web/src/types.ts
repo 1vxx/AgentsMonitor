@@ -129,6 +129,9 @@ export interface SummaryItem {
   stale?: boolean
   attention?: { kind: AttentionKind; since: number; tool?: string; subject?: string; message?: string }
   last_turn?: { outcome: TurnOutcome; ended_at: number }
+  tokens?: number
+  tokens_exact?: boolean
+  context?: { tokens?: number; window?: number; percent?: number }
 }
 
 export interface Summary {

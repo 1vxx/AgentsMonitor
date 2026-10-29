@@ -912,6 +912,68 @@ void listLayer(float a, float e) {
 
 // ---------- Detail ----------
 
+// "950", "12.3K", "845K", "1.24M", "12.5M": the dashboard's compact counts, in capitals
+void count(uint64_t n, char *out, size_t len) {
+  if (n < 1000)
+    snprintf(out, len, "%u", unsigned(n));
+  else if (n < 1000000)
+    snprintf(out, len, n < 10000 ? "%.1fK" : "%.0fK", n / 1e3);
+  else if (n < 1000000000)
+    snprintf(out, len, n < 10000000 ? "%.2fM" : "%.1fM", n / 1e6);
+  else
+    snprintf(out, len, "%.2fB", n / 1e9);
+}
+
+bool hasUsage(const Session &s) { return s.tokens || s.context >= 0; }
+
+// What a session has used, under its state line from `top`: its tokens and
+// how full its context is, side by side, the context over a row of dots that
+// fill, turning amber at 70% and red at 90% as the dashboard's meters do. It
+// needs the title held to two lines.
+void usage(const Session &s, float cx, int top, float a) {
+  char tokens[24] = "", context[16] = "";
+  if (s.tokens) {
+    char n[20];
+    count(s.tokens, n, sizeof n);
+    snprintf(tokens, sizeof tokens, "%s%s", s.tokensExact ? "" : "~", n);  // ~ for an estimate
+  }
+  float pct = s.context;
+  if (pct >= 0) snprintf(context, sizeof context, "%d%%", int(pct + 0.5f));
+  if (!tokens[0] && !context[0]) return;
+
+  constexpr int DOTS = 12;
+  constexpr float PITCH = 10, GAP = 48;
+  struct Column {
+    const char *value;
+    bool dots;
+    float w;
+  } cols[2];
+  int n = 0;
+  if (tokens[0]) cols[n++] = {tokens, false, 0};
+  if (context[0]) cols[n++] = {context, true, 0};
+  float total = GAP * (n - 1);
+  for (int k = 0; k < n; k++) {
+    Column &c = cols[k];
+    c.w = text::width(PROP, 4, c.value);
+    if (c.dots && c.w < DOTS * PITCH) c.w = DOTS * PITCH;
+    total += c.w;
+  }
+  uint16_t lit = gfx::c565(TONE_COLORS[pct >= 90 ? CRITICAL : pct >= 70 ? ATTN : ACTIVE]), unlit = gfx::c565(TEXT_4);
+  float x = cx - total / 2;
+  for (int k = 0; k < n; k++) {
+    const Column &c = cols[k];
+    float mid = x + c.w / 2;
+    text::centre(PROP, 4, c.value, mid, top + 62, gfx::c565(TEXT_2), a);
+    if (c.dots) {
+      int on = int(pct / 100 * DOTS + 0.5f);
+      if (pct > 0 && on < 1) on = 1;
+      float x0 = mid - (DOTS - 1) * PITCH / 2;
+      for (int d = 0; d < DOTS; d++) gfx::discAt(x0 + d * PITCH, top + 82.f, 2.8f, d < on ? lit : unlit, d < on ? a : 0.6f * a);
+    }
+    x += c.w + GAP;
+  }
+}
+
 void detailLayer(float a, float e) {
   float sx, sy;
   shift(sx, sy);
@@ -931,8 +993,10 @@ void detailLayer(float a, float e) {
   text::centre(LABEL, 3, agent, cx, 108 + lift(1), gfx::c565(TEXT_3), fade(1));
   text::centre(PROP, 3, project, cx, 138 + lift(1), gfx::c565(TEXT_4), fade(1));
 
+  // Up to three lines of title, or two leaving room for what it has used
+  bool used = !isWaiting(s) && hasUsage(s);
   char lines[3][160];
-  int n = text::wrap(PROP, 4, titleOf(s), 340, lines, 3);
+  int n = text::wrap(PROP, 4, titleOf(s), 340, lines, used ? 2 : 3);
   int y = 196;
   for (int k = 0; k < n; k++, y += 46) text::centre(PROP, 4, lines[k], cx, y + lift(2), gfx::c565(TEXT), fade(2));
 
@@ -941,7 +1005,8 @@ void detailLayer(float a, float e) {
   pickLine(states, m, LABEL, 3, 360, state, sizeof state);
   text::centre(LABEL, 3, state, cx, y + 4 + lift(3), gfx::c565(toneText(t)), fade(3));
 
-  // What it waits on
+  // What it has used, or what it waits on
+  if (used) usage(s, cx, y + 4 + lift(4), fade(4));
   if (!isWaiting(s)) return;
   char what[480], tool[64], box[3][160];
   toolName(s.waitTool[0] ? s.waitTool : s.tool, tool, sizeof tool);

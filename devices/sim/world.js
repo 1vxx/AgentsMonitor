@@ -7,6 +7,13 @@ const MAX_ITEMS = 8
 const isWaiting = s => s.status === 'waiting_input' || s.status === 'waiting_permission'
 const isWorking = s => s.status === 'thinking' || s.status === 'tool' || s.status === 'compacting'
 
+// While it works a session uses tokens (cache reads most of them) and fills
+// its context; each starts from its own amount, so no two read alike
+const TOKENS_PER_S = 9000
+const CONTEXT_PER_S = 0.25
+const seed = key => [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
+const workedMs = (s, now) => s.workedMs + (isWorking(s) ? now - s.markAt : 0)
+
 export class World {
   constructor() {
     this.sessions = new Map()
@@ -19,6 +26,8 @@ export class World {
 
   start(now, key, { title, project = 'AgentsMonitor', agent = 'claude-code' }) {
     const s = { key, agent, project, title, status: 'thinking', since: now, turnStart: now, lastSeen: now, stale: false }
+    const h = seed(key)
+    Object.assign(s, { tokensFrom: 300_000 + (h % 2_500_000), contextFrom: 12 + (h % 30), workedMs: 0, markAt: now })
     this.sessions.set(key, s)
     return s
   }
@@ -34,6 +43,8 @@ export class World {
   touch(now, key, change) {
     const s = this.sessions.get(key)
     if (!s) return
+    s.workedMs = workedMs(s, now)
+    s.markAt = now
     Object.assign(s, change, { lastSeen: now })
   }
 
@@ -104,18 +115,25 @@ export class World {
       ts: now,
       mood,
       counts,
-      sessions: live.slice(0, MAX_ITEMS).map(s => ({
-        key: s.key,
-        agent: s.agent,
-        project: s.project,
-        title: s.title,
-        status: s.status,
-        since: s.since,
-        tool: isWorking(s) || isWaiting(s) ? s.tool : undefined,
-        stale: s.stale || undefined,
-        attention: s.attention,
-        last_turn: s.last_turn,
-      })),
+      sessions: live.slice(0, MAX_ITEMS).map(s => {
+        const worked = workedMs(s, now) / 1000
+        return {
+          key: s.key,
+          agent: s.agent,
+          project: s.project,
+          title: s.title,
+          status: s.status,
+          since: s.since,
+          tool: isWorking(s) || isWaiting(s) ? s.tool : undefined,
+          stale: s.stale || undefined,
+          attention: s.attention,
+          last_turn: s.last_turn,
+          tokens: Math.round(s.tokensFrom + worked * TOKENS_PER_S),
+          // Codex's counts read as an estimate here, to show how one looks
+          tokens_exact: s.agent !== 'codex' || undefined,
+          context: { percent: Math.min(97, s.contextFrom + worked * CONTEXT_PER_S) },
+        }
+      }),
       quotas: [],
     }
   }

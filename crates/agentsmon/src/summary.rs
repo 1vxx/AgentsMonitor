@@ -86,6 +86,9 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                     message: a.message.as_deref().and_then(|t| preview(t, MAX_TEXT)),
                 }),
                 last_turn: s.last_turn.as_ref().map(|t| TurnBrief { outcome: t.outcome, ended_at: t.ended_at }),
+                tokens: Some(tokens(s)).filter(|&n| n > 0),
+                tokens_exact: s.stats.exact_tokens,
+                context: s.context.clone(),
             })
             .collect(),
         quotas: quotas
@@ -96,6 +99,12 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
             })
             .collect(),
     }
+}
+
+/// Every token a session has used, as the dashboard's cards add them up.
+fn tokens(s: &Session) -> u64 {
+    let t = &s.stats;
+    t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_write_tokens
 }
 
 /// Where a session stands, as the Live view orders its cards. Bands first:
@@ -125,7 +134,7 @@ pub fn same(a: &Summary, b: &Summary) -> bool {
 mod tests {
     use super::*;
     use crate::reducer::{apply, new_session};
-    use agentsmon_protocol::{AttentionKind, Event};
+    use agentsmon_protocol::{AttentionKind, ContextUsage, Event};
 
     #[test]
     fn waiting_wins_and_sorts_first() {
@@ -186,6 +195,28 @@ mod tests {
         let subject = wait.subject.as_deref().unwrap();
         assert!(subject.starts_with("npm run build") && subject.ends_with('…') && subject.chars().count() == MAX_TEXT);
         assert_eq!(summary.sessions[1].last_turn, Some(TurnBrief { outcome: TurnOutcome::Error, ended_at: 5 }));
+    }
+
+    #[test]
+    fn carries_tokens_and_context_once_there_are_any() {
+        let mut used = new_session("claude-code", "a", 0);
+        used.stats.input_tokens = 1_000;
+        used.stats.output_tokens = 200;
+        used.stats.cache_read_tokens = 30_000;
+        used.stats.cache_write_tokens = 4_000;
+        used.stats.exact_tokens = true;
+        used.context = Some(ContextUsage { tokens: Some(84_000), window: Some(200_000), percent: Some(42.0) });
+        let fresh = new_session("claude-code", "b", 1);
+
+        let summary = build([&used, &fresh].into_iter(), &[], 10);
+        let item = |key: &str| summary.sessions.iter().find(|s| s.key == key).unwrap();
+        let a = item("claude-code:a");
+        assert_eq!((a.tokens, a.tokens_exact), (Some(35_200), true));
+        assert_eq!(a.context.as_ref().and_then(|c| c.percent), Some(42.0));
+        let b = item("claude-code:b");
+        assert_eq!((b.tokens, b.tokens_exact, b.context.is_none()), (None, false, true));
+        let json = serde_json::to_value(b).unwrap();
+        assert!(json.get("tokens").is_none() && json.get("tokens_exact").is_none() && json.get("context").is_none());
     }
 
     #[test]

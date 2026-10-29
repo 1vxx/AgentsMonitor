@@ -232,6 +232,14 @@ bool parse(const char *json, Summary &out) {
       s.outcome = outcome(last["outcome"].str);
       s.endedAt = int64_t(last["ended_at"].num);
     }
+    s.tokens = uint64_t(item["tokens"].num);
+    s.tokensExact = item["tokens_exact"].truth;
+    const Value &ctx = item["context"];
+    s.context = -1;
+    if (ctx["percent"].type == Value::NUM)
+      s.context = float(ctx["percent"].num);
+    else if (ctx["tokens"].type == Value::NUM && ctx["window"].num > 0)
+      s.context = float(ctx["tokens"].num / ctx["window"].num * 100);
   }
   return true;
 }
