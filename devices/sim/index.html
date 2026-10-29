@@ -53,10 +53,14 @@
             <label>WebSocket 地址
               <input id="ws-url" value="ws://127.0.0.1:7788/v1/ws" spellcheck="false" />
             </label>
+            <label>Token
+              <input id="ws-token" type="password" placeholder="daemon 不要求时留空" autocomplete="off" spellcheck="false" />
+            </label>
             <div class="row">
               <button id="ws-connect">连接</button>
               <span class="note" id="ws-state">未连接</span>
             </div>
+            <p class="note">daemon 在本机时用 127.0.0.1 就行；它监听局域网时要填 <code>~/.agentsmon/config.toml</code> 里的 <code>http.token</code>。地址和 token 记在这个浏览器里。</p>
             <p class="note">需要本机运行着带 <code>attention</code> / <code>last_turn</code> 字段的新版 daemon，否则提醒卡里看不到要授权的命令。</p>
           </div>
         </div>

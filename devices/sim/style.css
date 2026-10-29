@@ -148,7 +148,8 @@ label.inline {
   gap: 6px;
 }
 
-#ws-url {
+#ws-url,
+#ws-token {
   font-family: ui-monospace, 'SF Mono', monospace;
 }
 

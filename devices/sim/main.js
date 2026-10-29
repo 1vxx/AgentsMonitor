@@ -151,12 +151,49 @@ $('restart').onclick = () => resetScript()
 let ws = null
 let retry = null
 
+// The address and token are kept in this browser between visits. A browser
+// WebSocket can't send an Authorization header, so the token rides in the URL.
+const saved = key => {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const save = (key, value) => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {}
+}
+$('ws-url').value = saved('am.ws-url') || $('ws-url').value
+$('ws-token').value = saved('am.ws-token') || ''
+
+const liveUrl = () => {
+  const token = $('ws-token').value.trim()
+  save('am.ws-url', $('ws-url').value.trim())
+  save('am.ws-token', token)
+  try {
+    const url = new URL($('ws-url').value.trim())
+    if (token) url.searchParams.set('token', token)
+    return url.href
+  } catch {
+    return null
+  }
+}
+
 const connectLive = () => {
   clearTimeout(retry)
   ws?.close()
   ui.link('connecting')
+  const url = liveUrl()
+  if (!url) {
+    ws = null
+    ui.link('lost')
+    $('ws-state').textContent = '地址不对，应形如 ws://127.0.0.1:7788/v1/ws'
+    return
+  }
   $('ws-state').textContent = '连接中…'
-  const sock = new WebSocket($('ws-url').value)
+  const sock = new WebSocket(url)
   ws = sock
   sock.onopen = () => {
     ui.link('online')
