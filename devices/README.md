@@ -8,9 +8,11 @@ for one **board**; the review page runs the same display program in a browser.
 devices/
 ├── core/     shared by every display program, no platform underneath
 │             ui.h is what a display program implements; model (the summary),
+│             events (waits, finished turns and reminders read off it),
 │             gfx and text (drawing), synth (chimes), spring (motion)
 ├── apps/     display programs, each implementing core/ui.h
-│   └── halo/     the mood orb, session list and detail, for the 466x466 round panel
+│   ├── halo/     the mood orb, session list and detail, for the 466x466 round panel
+│   └── pets/     each session a pixel animal on an LED dot board, acting out its state
 ├── boards/   one per board: its drivers and an Arduino sketch that runs a display program
 │   └── waveshare_amoled_175c/   Waveshare ESP32-S3-Touch-AMOLED-1.75C
 ├── sim/      the review page: a display program in WASM, with scripted or live summaries

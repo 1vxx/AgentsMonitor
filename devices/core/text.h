@@ -41,6 +41,13 @@ void roll(Face f, int scale, const char *now, const char *was, float roll, float
 // Keeps drawing to rows [y0, y1) until reset with (0, 466)
 void clipRows(int y0, int y1);
 
+// A glyph as the dots it lights, for drawing text on a dot grid of one's own:
+// their columns and rows in font pixels from the pen and the baseline (rows
+// above it negative). Returns how many, at most max.
+int glyphDots(Face f, uint32_t cp, int16_t (*out)[2], int max);
+// How far a character moves the pen, in font pixels
+int penAdvance(Face f, uint32_t cp);
+
 // Copies as much of s as fits in maxW, ending in an ellipsis if cut
 void fit(Face f, int scale, const char *s, int maxW, char *out, size_t outLen);
 // Breaks s into lines of at most maxW, at spaces where it can (MONO anywhere);

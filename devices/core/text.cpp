@@ -425,6 +425,10 @@ constexpr uint32_t ELLIPSIS = 0x2026;
 
 }  // namespace
 
+int glyphDots(Face f, uint32_t cp, int16_t (*out)[2], int max) { return dots(f == LABEL ? PROP : f, cp, out, max); }
+
+int penAdvance(Face f, uint32_t cp) { return advance(f, cp); }
+
 bool init(const uint8_t *data, size_t len) {
   int n = 0;
   for (const Art &a : ART) {
