@@ -37,7 +37,7 @@ devices/sim/build.sh                       # builds every theme
 python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 ```
 
-Open http://127.0.0.1:8466 and pick a theme at the top. Drag on the round screen to swipe, click to tap, and press `B` for the side button. To see your own sessions, switch the data source to the live daemon (`ws://127.0.0.1:7788/v1/ws`, plus the token if you set one). No agents at hand? [`scripts/demo.py`](../docs/USAGE.md#demo-mode) runs a daemon full of made-up sessions to point it at.
+Open http://127.0.0.1:8466 and pick a theme at the top. Drag on the round screen to swipe, click to tap, and press `B` for the side button; `?` lists every shortcut. The page follows your system's light or dark mode, or pick one at the top. To see your own sessions, switch the data source to the live daemon (`ws://127.0.0.1:7788/v1/ws`, plus the token if you set one). No agents at hand? [`scripts/demo.py`](../docs/USAGE.md#demo-mode) runs a daemon full of made-up sessions to point it at.
 
 > In Claude Desktop, the `device` entry in `.claude/launch.json` serves this page.
 

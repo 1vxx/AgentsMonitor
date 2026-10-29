@@ -1,30 +1,18 @@
 // The review page: runs a theme (build/<theme>.js, see build.sh) on a canvas,
 // turns the mouse into touches, plays its chimes, and feeds it summaries from
-// a scripted world or from the daemon itself.
+// a scripted world or from the daemon itself. page.js keeps the page around it.
 
 import { apply, lang, pick, setLang, t } from './i18n.js'
+import { $, cycleMode, drawDial, keysOpen, onKey, save, saved, segmented, showKeys, showMode, themeMenu, toast } from './page.js'
 import { SCENARIOS } from './scenarios.js'
 import { World } from './world.js'
 
 const SIZE = 466
 const LINK = { connecting: 0, online: 1, lost: 2 }
-const $ = id => document.getElementById(id)
-
-const saved = key => {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-const save = (key, value) => {
-  try {
-    localStorage.setItem(key, value)
-  } catch {}
-}
 
 apply()
-$('readout').textContent = t('loading')
+showMode()
+drawDial()
 
 // ---------- The theme ----------
 
@@ -35,14 +23,14 @@ const THEMES = await fetch('build/themes.json').then(r => r.json())
 const asked = new URLSearchParams(location.search).get('theme') || saved('am.theme')
 const theme = THEMES.find(x => x.id === asked) ?? THEMES[0]
 save('am.theme', theme.id)
-for (const x of THEMES) $('theme').append(new Option(pick(x.name), x.id, false, x === theme))
-$('theme').onchange = e => {
+const menu = themeMenu(THEMES, theme, pick, next => {
   const url = new URL(location.href)
-  url.searchParams.set('theme', e.target.value)
+  url.searchParams.set('theme', next.id)
   location.href = url.href
-}
+})
 const describeTheme = () => {
-  for (const o of $('theme').options) o.textContent = pick(THEMES.find(x => x.id === o.value).name)
+  menu.describe()
+  $('theme-title').textContent = pick(theme.name)
   $('theme-about').textContent = `${pick(theme.about)} ${t('by', { author: theme.author })}`
 }
 
@@ -82,6 +70,11 @@ const ui = {
   },
 }
 
+// The stage glows in the display's mood
+const showMood = mood => {
+  if (document.documentElement.dataset.mood !== mood) document.documentElement.dataset.mood = mood
+}
+
 // ---------- Sound ----------
 
 let audio = null
@@ -100,27 +93,34 @@ const play = cue => {
   src.start()
 }
 
+// Each chime's name and tone, as the cue buttons show them
+const CUE_TONES = ['attn', 'attn', 'good', 'bad', 'legend']
 const cueName = c => t(`cue.${c}`)
 
 const log = text => {
   const li = document.createElement('li')
-  li.textContent = `${new Date().toLocaleTimeString()}  ${text}`
+  const time = document.createElement('time')
+  time.textContent = new Date().toLocaleTimeString([], { hour12: false })
+  li.append(time, text)
   $('log').prepend(li)
   while ($('log').children.length > 30) $('log').lastChild.remove()
 }
 
+const showSound = () => {
+  $('sound').setAttribute('aria-checked', String(!!audio))
+  $('sound').title = t(audio ? 'sound.off' : 'sound.on')
+}
 $('sound').onclick = () => {
   if (audio) {
     audio.close()
     audio = null
-    $('sound').textContent = t('sound.on')
-    return
+  } else {
+    audio = new AudioContext()
+    gain = audio.createGain()
+    gain.gain.value = +$('volume').value
+    gain.connect(audio.destination)
   }
-  audio = new AudioContext()
-  gain = audio.createGain()
-  gain.gain.value = +$('volume').value
-  gain.connect(audio.destination)
-  $('sound').textContent = t('sound.off')
+  showSound()
 }
 $('volume').oninput = () => gain && (gain.gain.value = +$('volume').value)
 document.querySelectorAll('[data-cue]').forEach(b => (b.onclick = () => play(+b.dataset.cue)))
@@ -128,11 +128,12 @@ document.querySelectorAll('[data-cue]').forEach(b => (b.onclick = () => play(+b.
 // ---------- Sources ----------
 
 let source = 'script'
-let scenario = SCENARIOS[0]
+let scenario = SCENARIOS.find(s => s.id === saved('am.scenario')) ?? SCENARIOS[0]
 let world = new World()
 let step = 0
 let virtual = 0 // seconds into the script
 let playing = true
+let speed = 1
 let base = Date.now()
 let lastLink = null
 let lastSummary = ''
@@ -149,7 +150,7 @@ const resetScript = () => {
 }
 
 const advanceScript = dt => {
-  if (playing) virtual += dt * +$('speed').value
+  if (playing) virtual += dt * speed
   if (scenario.loop && virtual >= scenario.length) resetScript()
   while (step < scenario.script.length && scenario.script[step][0] <= virtual) scenario.script[step++][1](world, now())
   pushWorld()
@@ -161,8 +162,9 @@ const pushWorld = () => {
     lastLink = world.link
     lastSummary = ''
   }
-  if (world.link !== 'online') return
+  if (world.link !== 'online') return showMood('offline')
   const sum = world.summary(now())
+  showMood(sum.mood)
   const json = JSON.stringify({ ...sum, ts: 0 })
   if (json !== lastSummary) {
     ui.summary(JSON.stringify(sum))
@@ -170,24 +172,58 @@ const pushWorld = () => {
   }
 }
 
-for (const s of SCENARIOS) $('scenario').append(new Option(pick(s.name), s.id))
+// The script's progress, with a mark at each moment it changes something
+const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+const drawMarks = () => {
+  const at = [...new Set(scenario.script.map(([s]) => s))].filter(s => s > 0 && s < scenario.length)
+  $('tl-marks').replaceChildren(
+    ...at.map(s => {
+      const i = document.createElement('i')
+      i.style.left = `${(s / scenario.length) * 100}%`
+      i.dataset.at = s
+      return i
+    }),
+  )
+}
+const showProgress = () => {
+  const done = Math.min(1, virtual / scenario.length)
+  $('tl-fill').style.width = `${done * 100}%`
+  for (const i of $('tl-marks').children) i.classList.toggle('past', +i.dataset.at <= virtual)
+  $('clock').innerHTML = `<b>${clock(Math.min(virtual, scenario.length))}</b> / ${clock(scenario.length)}`
+}
+
+for (const s of SCENARIOS) $('scenario').append(new Option(pick(s.name), s.id, false, s === scenario))
 const describeScenario = () => {
   for (const o of $('scenario').options) o.textContent = pick(SCENARIOS.find(s => s.id === o.value).name)
   $('scenario-note').textContent = pick(scenario.note)
 }
 const pickScenario = id => {
   scenario = SCENARIOS.find(s => s.id === id)
+  save('am.scenario', id)
   describeScenario()
+  drawMarks()
   resetScript()
 }
 $('scenario').onchange = e => pickScenario(e.target.value)
 pickScenario(scenario.id)
 
-$('play').onclick = () => {
-  playing = !playing
-  $('play').textContent = t(playing ? 'pause' : 'resume')
+const showPlaying = () => {
+  $('play').dataset.state = playing ? 'playing' : 'paused'
+  $('play').title = t(playing ? 'pause' : 'resume')
+  $('play').setAttribute('aria-label', t(playing ? 'pause' : 'resume'))
 }
+const togglePlay = () => {
+  playing = !playing
+  showPlaying()
+}
+$('play').onclick = togglePlay
 $('restart').onclick = () => resetScript()
+$('restart').title = t('restart')
+
+const setSpeed = segmented('speed', saved('am.speed') ?? '1', v => {
+  speed = +v
+  save('am.speed', v)
+})
 
 // The live daemon
 let ws = null
@@ -211,17 +247,21 @@ const liveUrl = () => {
   }
 }
 
-// What the link is doing, kept as a key so it can be said again in another language
+// What the link is doing, kept as a key so it can be said again in another
+// language, with the tone of its dot
+const WS_TONES = { 'ws.idle': 'rest', 'ws.connecting': 'attn', 'ws.open': 'good', 'ws.closed': 'bad', 'ws.bad': 'bad' }
 let wsKey = 'ws.idle'
 const wsSay = key => {
   wsKey = key
-  $('ws-state').textContent = t(key)
+  $('ws-state').className = `status t-${WS_TONES[key]}`
+  $('ws-state').lastElementChild.textContent = t(key)
 }
 
 const connectLive = () => {
   clearTimeout(retry)
   ws?.close()
   ui.link('connecting')
+  showMood('offline')
   const url = liveUrl()
   if (!url) {
     ws = null
@@ -241,36 +281,36 @@ const connectLive = () => {
     if ((m.type === 'snapshot' || m.type === 'summary') && m.summary) {
       ui.summary(JSON.stringify(m.summary))
       liveSessions = m.summary.sessions
+      showMood(m.summary.mood)
     }
   }
   sock.onclose = () => {
     if (ws !== sock) return
     ui.link('lost')
+    showMood('offline')
     wsSay('ws.closed')
     if (source === 'live') retry = setTimeout(connectLive, 3000)
   }
 }
 let liveSessions = []
 
-document.querySelectorAll('#source button').forEach(
-  b =>
-    (b.onclick = () => {
-      source = b.dataset.v
-      document.querySelectorAll('#source button').forEach(x => x.classList.toggle('on', x === b))
-      $('script-box').hidden = source !== 'script'
-      $('events-box').hidden = source !== 'script'
-      $('live-box').hidden = source !== 'live'
-      if (source === 'live') {
-        connectLive()
-      } else {
-        clearTimeout(retry)
-        const sock = ws
-        ws = null
-        sock?.close()
-        resetScript()
-      }
-    }),
-)
+segmented('source', 'script', v => {
+  if (v === source) return
+  source = v
+  $('script-box').hidden = source !== 'script'
+  $('events-box').hidden = source !== 'script'
+  $('live-box').hidden = source !== 'live'
+  if (source === 'live') {
+    connectLive()
+  } else {
+    clearTimeout(retry)
+    const sock = ws
+    ws = null
+    sock?.close()
+    wsSay('ws.idle')
+    resetScript()
+  }
+})
 $('ws-connect').onclick = connectLive
 
 // ---------- Hand-made events ----------
@@ -307,9 +347,17 @@ const EVENTS = {
   },
   link: () => (world.link = world.link === 'online' ? 'lost' : 'online'),
 }
-document.querySelectorAll('[data-ev]').forEach(b => (b.onclick = () => EVENTS[b.dataset.ev]()))
+document.querySelectorAll('[data-ev]').forEach(
+  b =>
+    (b.onclick = () => {
+      EVENTS[b.dataset.ev]()
+      b.classList.remove('hit')
+      void b.offsetWidth // so the ring plays again on a quick second click
+      b.classList.add('hit')
+    }),
+)
 
-// ---------- Touch ----------
+// ---------- Touch and buttons ----------
 
 const canvas = $('screen')
 const ctx = canvas.getContext('2d')
@@ -328,9 +376,6 @@ canvas.onpointerup = e => ui.touch(2, ...point(e), performance.now())
 // (on the frames' clock, which a scripted run moves ahead)
 const side = () => ui.press(performance.now() + skew)
 $('side').onclick = side
-addEventListener('keydown', e => {
-  if (e.key.toLowerCase() === 'b' && !e.repeat && !(e.target instanceof HTMLInputElement)) side()
-})
 
 // The other button: held 3 s, it summons, once per hold
 let holding
@@ -342,22 +387,53 @@ $('boot').onpointerup = $('boot').onpointercancel = () => clearTimeout(holding)
 
 // ---------- Display ----------
 
-const applyZoom = () => {
-  const z = +$('zoom').value
-  canvas.style.width = canvas.style.height = `${SIZE * z}px`
-  canvas.classList.toggle('pixelated', z > 1)
-}
-$('zoom').onchange = applyZoom
-applyZoom()
+let fps = 60
+segmented('zoom', saved('am.zoom') ?? '1', v => {
+  save('am.zoom', v)
+  document.documentElement.style.setProperty('--zoom', v)
+  // Past life size the stage takes the whole width
+  document.body.classList.toggle('big', +v > 1)
+  canvas.classList.toggle('pixelated', +v > 1)
+})
+segmented('fps', saved('am.fps') ?? '60', v => {
+  fps = +v
+  save('am.fps', v)
+})
 
-const escape = text => String(text).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`)
+const SESSION_TONES = { waiting_permission: 'attn', waiting_input: 'attn', thinking: 'work', tool: 'work', compacting: 'work' }
+const toneOf = s => {
+  if (s.stale) return 'rest'
+  if (SESSION_TONES[s.status]) return SESSION_TONES[s.status]
+  const end = s.last_turn?.outcome
+  return end === 'answer' ? 'good' : end === 'error' || end === 'refusal' ? 'bad' : 'rest'
+}
 const showSessions = list => {
-  const rows = list.map(s => {
-    const state = s.stale ? t('status.stale') : `${t(`status.${s.status}`)}${s.status === 'tool' && s.tool ? ` ${s.tool}` : ''}`
-    const end = s.status === 'idle' && s.last_turn ? ` · ${s.last_turn.outcome}` : ''
-    return `<tr><td>${escape(s.title || s.project)}</td><td class="state">${escape(state + end)}</td></tr>`
-  })
-  $('sessions').innerHTML = rows.join('') || `<tr><td class="state">${t('status.none')}</td></tr>`
+  $('session-count').textContent = list.length ? String(list.length) : ''
+  if (!list.length) {
+    const li = document.createElement('li')
+    li.className = 'empty'
+    li.textContent = t('status.none')
+    return $('sessions').replaceChildren(li)
+  }
+  $('sessions').replaceChildren(
+    ...list.map(s => {
+      const li = document.createElement('li')
+      li.className = `t-${toneOf(s)}${s.stale ? ' stale' : ''}`
+      const name = document.createElement('span')
+      name.className = 'name'
+      name.textContent = s.title || s.project
+      const proj = document.createElement('small')
+      proj.textContent = `${s.project} · ${s.agent === 'codex' ? 'codex' : 'claude'}`
+      name.append(proj)
+      const state = document.createElement('span')
+      state.className = 'state'
+      const what = s.stale ? t('status.stale') : `${t(`status.${s.status}`)}${s.status === 'tool' && s.tool ? ` ${s.tool}` : ''}`
+      const end = s.status === 'idle' && s.last_turn ? ` · ${s.last_turn.outcome}` : ''
+      state.textContent = what + end
+      li.append(document.createElement('i'), name, state)
+      return li
+    }),
+  )
 }
 
 // ---------- The loop ----------
@@ -372,12 +448,15 @@ let skew = 0
 
 const tick = forced => {
   const at = performance.now() + skew
-  if (!forced && at - lastFrame < 1000 / +$('fps').value - 2) return
+  if (!forced && at - lastFrame < 1000 / fps - 2) return
   lastFrame = at
   const dt = Math.min(1, (at - lastTick) / 1000)
   lastTick = at
 
-  if (source === 'script') advanceScript(dt)
+  if (source === 'script') {
+    advanceScript(dt)
+    showProgress()
+  }
   const wall = source === 'script' ? now() : Date.now()
   const ptr = ui.frame(at, wall)
   ctx.putImageData(new ImageData(new Uint8ClampedArray(mod.HEAPU8.buffer, ptr, SIZE * SIZE * 4).slice(), SIZE, SIZE), 0, 0)
@@ -386,45 +465,58 @@ const tick = forced => {
 
   for (let c; (c = ui.cue()) >= 0; ) {
     log(t('log.cue', { name: cueName(c) }) + (audio ? '' : t('log.muted')))
+    toast(cueName(c), CUE_TONES[c])
     play(c)
   }
 
   if (at - statAt > 500) {
-    const fps = (frames * 1000) / (at - statAt)
-    $('readout').textContent = t('readout', { screen: ui.screen(), fps: fps.toFixed(0), ms: (drawMs / frames).toFixed(1) })
+    $('r-screen').textContent = ui.screen()
+    $('r-fps').textContent = ((frames * 1000) / (at - statAt)).toFixed(0)
+    $('r-ms').textContent = (drawMs / frames).toFixed(1)
     frames = 0
     drawMs = 0
     statAt = at
-    if (source === 'script') {
-      const m = Math.floor(virtual / 60)
-      const s = Math.floor(virtual % 60)
-      $('clock').textContent = `${m}:${String(s).padStart(2, '0')}`
-      showSessions(world.summary(now()).sessions)
-    } else {
-      showSessions(liveSessions)
-    }
+    showSessions(source === 'script' ? world.summary(now()).sessions : liveSessions)
   }
 }
 
-// ---------- Language ----------
+// ---------- Language and keys ----------
 
 // The words that say how things stand are set here, not by data-i18n, so a
 // change of language keeps what they say
 const showLang = () => {
-  document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('on', b.dataset.lang === lang))
   describeTheme()
   describeScenario()
-  $('play').textContent = t(playing ? 'pause' : 'resume')
-  $('sound').textContent = t(audio ? 'sound.off' : 'sound.on')
-  $('ws-state').textContent = t(wsKey)
+  showPlaying()
+  showSound()
+  showMode()
+  wsSay(wsKey)
+  $('restart').title = t('restart')
 }
-document.querySelectorAll('#lang button').forEach(
-  b =>
-    (b.onclick = () => {
-      setLang(b.dataset.lang)
-      showLang()
-    }),
-)
+segmented('lang', lang, v => {
+  if (v !== lang) setLang(v)
+  showLang()
+})
+
+const SPEEDS = ['1', '3', '10', '30']
+onKey(e => {
+  if (menu.key(e)) return e.preventDefault()
+  if (keysOpen()) {
+    if (e.key === 'Escape' || e.key === '?') showKeys(false)
+    return
+  }
+  const k = e.key.toLowerCase()
+  if (k === ' ' && source === 'script') togglePlay()
+  else if (k === 'r' && source === 'script') resetScript()
+  else if (k === 'b' && !e.repeat) side()
+  else if (k === 't') cycleMode()
+  else if (k === 'l') $('lang').querySelector(`[data-v="${lang === 'en' ? 'zh' : 'en'}"]`).click()
+  else if (k === '?') showKeys(true)
+  else if (SPEEDS[+k - 1] && source === 'script') setSpeed(SPEEDS[+k - 1])
+  else return
+  e.preventDefault()
+})
+
 showLang()
 
 const loop = () => {

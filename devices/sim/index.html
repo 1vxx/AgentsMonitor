@@ -4,140 +4,207 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AgentsMonitor display preview</title>
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // Light or dark before the first paint: the choice kept in this browser, else the system's
+      try {
+        const pref = localStorage.getItem('am.mode')
+        const dark = pref === 'dark' || (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.mode = dark ? 'dark' : 'light'
+      } catch {
+        document.documentElement.dataset.mode = 'dark'
+      }
+    </script>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header>
-      <div class="heading">
-        <h1 data-i18n="title">AgentsMonitor display preview</h1>
-        <p data-i18n="lead"></p>
-      </div>
-      <div class="controls">
-        <label class="inline"><span data-i18n="theme"></span>
-          <select id="theme"></select>
-        </label>
-        <div class="seg" id="lang">
-          <button data-lang="en">EN</button>
-          <button data-lang="zh">中文</button>
+    <header class="bar">
+      <div class="bar-in">
+        <a class="brand" href="./" aria-label="AgentsMonitor">
+          <span class="mark" aria-hidden="true"></span>
+          <span class="brand-name">AgentsMonitor</span>
+          <span class="brand-sub" data-i18n="title.short"></span>
+        </a>
+        <div class="tools">
+          <div class="picker">
+            <button class="pill" id="theme-btn" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="theme.pick">
+              <span class="pill-dot" aria-hidden="true"></span>
+              <span class="pill-label" data-i18n="theme"></span>
+              <span class="pill-value" id="theme-name"></span>
+              <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+            </button>
+            <ul class="menu" id="theme-menu" role="listbox" hidden></ul>
+          </div>
+          <div class="seg seg-sm" id="lang" role="group" aria-label="Language">
+            <button data-v="en">EN</button>
+            <button data-v="zh">中</button>
+          </div>
+          <button class="icon-btn" id="mode" aria-label="Appearance">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <g class="i-sun"><circle cx="10" cy="10" r="3.6" /><path d="M10 2.2v2M10 15.8v2M2.2 10h2M15.8 10h2M4.5 4.5l1.4 1.4M14.1 14.1l1.4 1.4M4.5 15.5l1.4-1.4M14.1 5.9l1.4-1.4" /></g>
+              <path class="i-moon" d="M15.6 12.4A6.3 6.3 0 0 1 7.6 4.4a6.3 6.3 0 1 0 8 8Z" />
+              <g class="i-auto"><circle cx="10" cy="10" r="6.6" /><path d="M10 3.4v13.2a6.6 6.6 0 0 0 0-13.2Z" class="fill" /></g>
+            </svg>
+          </button>
+          <button class="icon-btn" id="keys-btn" data-i18n-title="keys" aria-label="Shortcuts">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5" width="15" height="10" rx="2" /><path d="M5.5 8h1M8.5 8h1M11.5 8h1M14 8h.5M6 12h8" /></svg>
+          </button>
         </div>
       </div>
     </header>
 
-    <main>
-      <section class="device">
-        <div class="bezel" id="bezel">
-          <canvas id="screen" width="466" height="466"></canvas>
-          <button class="side" id="side" data-i18n-title="side.title"></button>
-          <button class="side low" id="boot" data-i18n-title="boot.title"></button>
+    <main class="wrap" id="wrap">
+      <section class="stage" id="stage">
+        <div class="glow" aria-hidden="true"></div>
+        <div class="rig" id="rig">
+          <svg class="dial" id="dial" viewBox="-100 -100 200 200" aria-hidden="true"></svg>
+          <div class="device" id="device">
+            <canvas id="screen" width="466" height="466"></canvas>
+            <button class="hw hw-side" id="side" data-i18n-title="side.title"></button>
+            <button class="hw hw-boot" id="boot" data-i18n-title="boot.title"></button>
+          </div>
+          <div class="toasts" id="toasts" aria-live="polite"></div>
         </div>
-        <p class="about" id="theme-about"></p>
-        <div class="readout" id="readout"></div>
-        <p class="hint" data-i18n="hint"></p>
+        <div class="meta">
+          <h1 class="theme-title" id="theme-title"></h1>
+          <p class="theme-about" id="theme-about"></p>
+          <div class="readout">
+            <span class="chip"><i class="mood-dot" aria-hidden="true"></i><span data-i18n="r.screen"></span> <b id="r-screen">–</b></span>
+            <span class="chip"><b id="r-fps">–</b> fps</span>
+            <span class="chip"><b id="r-ms">–</b> <span data-i18n="r.ms"></span></span>
+          </div>
+          <p class="hint" data-i18n="hint.short"></p>
+        </div>
       </section>
 
-      <section class="panel">
-        <div class="group">
-          <h2 data-i18n="source"></h2>
-          <div class="seg" id="source">
+      <aside class="console">
+        <section class="card">
+          <header class="card-h"><span class="idx">01</span><i class="rule"></i><h2 data-i18n="source"></h2></header>
+          <div class="seg seg-wide" id="source" role="group">
             <button data-v="script" class="on" data-i18n="source.script"></button>
             <button data-v="live" data-i18n="source.live"></button>
           </div>
 
-          <div id="script-box">
-            <label><span data-i18n="scenario"></span>
-              <select id="scenario"></select>
+          <div class="stack" id="script-box">
+            <label class="field"><span data-i18n="scenario"></span>
+              <span class="select"><select id="scenario"></select></span>
             </label>
             <p class="note" id="scenario-note"></p>
+            <div class="transport">
+              <button class="icon-btn primary" id="play">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path class="i-pause" d="M7 5v10M13 5v10" /><path class="i-play" d="M7 4.8v10.4L15.4 10Z" /></svg>
+              </button>
+              <button class="icon-btn" id="restart">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.6 9.2A5.6 5.6 0 1 1 6 14.4M4.4 4.6v4.8h4.8" /></svg>
+              </button>
+              <div class="timeline" id="timeline">
+                <div class="tl-track"><div class="tl-fill" id="tl-fill"></div><div class="tl-marks" id="tl-marks"></div></div>
+              </div>
+              <span class="clock" id="clock">0:00</span>
+            </div>
             <div class="row">
-              <button id="play"></button>
-              <button id="restart" data-i18n="restart"></button>
-              <label class="inline"><span data-i18n="speed"></span>
-                <select id="speed">
-                  <option value="1">1×</option>
-                  <option value="3">3×</option>
-                  <option value="10">10×</option>
-                  <option value="30">30×</option>
-                </select>
-              </label>
-              <span class="clock" id="clock"></span>
+              <span class="label" data-i18n="speed"></span>
+              <div class="seg seg-sm" id="speed" role="group">
+                <button data-v="1">1×</button><button data-v="3">3×</button><button data-v="10">10×</button><button data-v="30">30×</button>
+              </div>
             </div>
           </div>
 
-          <div id="live-box" hidden>
-            <label><span data-i18n="ws.url"></span>
-              <input id="ws-url" value="ws://127.0.0.1:7788/v1/ws" spellcheck="false" />
+          <div class="stack" id="live-box" hidden>
+            <label class="field"><span data-i18n="ws.url"></span>
+              <input id="ws-url" class="input mono" value="ws://127.0.0.1:7788/v1/ws" spellcheck="false" />
             </label>
-            <label><span data-i18n="ws.token"></span>
-              <input id="ws-token" type="password" data-i18n-placeholder="ws.tokenHint" autocomplete="off" spellcheck="false" />
+            <label class="field"><span data-i18n="ws.token"></span>
+              <input id="ws-token" class="input mono" type="password" data-i18n-placeholder="ws.tokenHint" autocomplete="off" spellcheck="false" />
             </label>
             <div class="row">
-              <button id="ws-connect" data-i18n="ws.connect"></button>
-              <span class="note" id="ws-state"></span>
+              <button class="btn" id="ws-connect" data-i18n="ws.connect"></button>
+              <span class="status" id="ws-state"><i></i><span></span></span>
             </div>
             <p class="note" data-i18n-html="ws.note"></p>
           </div>
-        </div>
+        </section>
 
-        <div class="group" id="events-box">
-          <h2 data-i18n="events"></h2>
+        <section class="card" id="events-box">
+          <header class="card-h"><span class="idx">02</span><i class="rule"></i><h2 data-i18n="events"></h2></header>
           <div class="grid">
-            <button data-ev="permission" data-i18n="ev.permission"></button>
-            <button data-ev="input" data-i18n="ev.input"></button>
-            <button data-ev="answer" data-i18n="ev.answer"></button>
-            <button data-ev="done" data-i18n="ev.done"></button>
-            <button data-ev="error" data-i18n="ev.error"></button>
-            <button data-ev="open" data-i18n="ev.open"></button>
-            <button data-ev="start" data-i18n="ev.start"></button>
-            <button data-ev="stale" data-i18n="ev.stale"></button>
-            <button data-ev="end" data-i18n="ev.end"></button>
-            <button data-ev="link" data-i18n="ev.link"></button>
+            <button class="ev" data-ev="permission"><i class="t-attn"></i><span data-i18n="ev.permission"></span></button>
+            <button class="ev" data-ev="input"><i class="t-attn"></i><span data-i18n="ev.input"></span></button>
+            <button class="ev" data-ev="answer"><i class="t-good"></i><span data-i18n="ev.answer"></span></button>
+            <button class="ev" data-ev="done"><i class="t-good"></i><span data-i18n="ev.done"></span></button>
+            <button class="ev" data-ev="error"><i class="t-bad"></i><span data-i18n="ev.error"></span></button>
+            <button class="ev" data-ev="open"><i class="t-ion"></i><span data-i18n="ev.open"></span></button>
+            <button class="ev" data-ev="start"><i class="t-work"></i><span data-i18n="ev.start"></span></button>
+            <button class="ev" data-ev="stale"><i class="t-rest"></i><span data-i18n="ev.stale"></span></button>
+            <button class="ev" data-ev="end"><i class="t-rest"></i><span data-i18n="ev.end"></span></button>
+            <button class="ev" data-ev="link"><i class="t-ion"></i><span data-i18n="ev.link"></span></button>
           </div>
+        </section>
+
+        <div class="pair">
+          <section class="card">
+            <header class="card-h"><span class="idx">03</span><i class="rule"></i><h2 data-i18n="sound"></h2></header>
+            <div class="row">
+              <button class="switch" id="sound" role="switch" aria-checked="false"><i></i></button>
+              <input type="range" id="volume" class="range" min="0" max="1" step="0.05" value="0.7" data-i18n-title="volume" />
+            </div>
+            <div class="chips" id="cues">
+              <button data-cue="0" class="t-attn" data-i18n="cue.0"></button>
+              <button data-cue="1" class="t-attn" data-i18n="cue.1"></button>
+              <button data-cue="2" class="t-good" data-i18n="cue.2"></button>
+              <button data-cue="3" class="t-bad" data-i18n="cue.3"></button>
+              <button data-cue="4" class="t-legend" data-i18n="cue.4"></button>
+            </div>
+            <ol class="log" id="log"></ol>
+          </section>
+
+          <section class="card">
+            <header class="card-h"><span class="idx">04</span><i class="rule"></i><h2 data-i18n="display"></h2></header>
+            <div class="field"><span data-i18n="zoom"></span>
+              <div class="seg seg-sm" id="zoom" role="group">
+                <button data-v="0.5" data-i18n-title="zoom.half">0.5×</button><button data-v="1" data-i18n-title="zoom.one">1×</button><button data-v="1.5">1.5×</button><button data-v="2" data-i18n-title="zoom.two">2×</button>
+              </div>
+            </div>
+            <div class="field"><span data-i18n="fps"></span>
+              <div class="seg seg-sm" id="fps" role="group">
+                <button data-v="15">15</button><button data-v="30">30</button><button data-v="60" data-i18n-title="fps.device">60</button>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div class="group">
-          <h2 data-i18n="sound"></h2>
-          <div class="row">
-            <button id="sound"></button>
-            <label class="inline"><span data-i18n="volume"></span> <input type="range" id="volume" min="0" max="1" step="0.05" value="0.7" /></label>
-          </div>
-          <div class="row">
-            <span class="note" data-i18n="listen"></span>
-            <button data-cue="0" data-i18n="cue.0"></button>
-            <button data-cue="1" data-i18n="cue.1"></button>
-            <button data-cue="2" data-i18n="cue.2"></button>
-            <button data-cue="3" data-i18n="cue.3"></button>
-            <button data-cue="4" data-i18n="cue.4"></button>
-          </div>
-          <ol class="log" id="log"></ol>
-        </div>
-
-        <div class="group">
-          <h2 data-i18n="display"></h2>
-          <div class="row">
-            <label class="inline"><span data-i18n="zoom"></span>
-              <select id="zoom">
-                <option value="0.5" data-i18n="zoom.half"></option>
-                <option value="1" selected data-i18n="zoom.one"></option>
-                <option value="1.5">1.5×</option>
-                <option value="2" data-i18n="zoom.two"></option>
-              </select>
-            </label>
-            <label class="inline"><span data-i18n="fps"></span>
-              <select id="fps">
-                <option value="15">15</option>
-                <option value="30">30</option>
-                <option value="60" selected data-i18n="fps.device"></option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div class="group">
-          <h2 data-i18n="sessions"></h2>
-          <table id="sessions"></table>
-        </div>
-      </section>
+        <section class="card">
+          <header class="card-h"><span class="idx">05</span><i class="rule"></i><h2 data-i18n="sessions"></h2><span class="count" id="session-count"></span></header>
+          <ul class="sessions" id="sessions"></ul>
+        </section>
+      </aside>
     </main>
+
+    <footer class="foot">
+      <span data-i18n="lead"></span>
+      <a href="https://github.com/1vxx/AgentsMonitor/tree/main/devices/themes" data-i18n="foot.themes"></a>
+    </footer>
+
+    <div class="sheet" id="keys" role="dialog" aria-modal="true" aria-labelledby="keys-title" hidden>
+      <div class="sheet-card">
+        <header class="card-h"><span class="idx">?</span><i class="rule"></i><h2 id="keys-title" data-i18n="keys"></h2></header>
+        <dl class="keys">
+          <dt><kbd>Space</kbd></dt><dd data-i18n="k.play"></dd>
+          <dt><kbd>R</kbd></dt><dd data-i18n="k.restart"></dd>
+          <dt><kbd>B</kbd></dt><dd data-i18n="k.side"></dd>
+          <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd data-i18n="k.speed"></dd>
+          <dt><kbd>T</kbd></dt><dd data-i18n="k.mode"></dd>
+          <dt><kbd>L</kbd></dt><dd data-i18n="k.lang"></dd>
+          <dt><kbd>?</kbd></dt><dd data-i18n="k.keys"></dd>
+        </dl>
+        <dl class="keys gestures">
+          <dt data-i18n="g.click"></dt><dd data-i18n="g.tap"></dd>
+          <dt data-i18n="g.drag"></dt><dd data-i18n="g.swipe"></dd>
+          <dt data-i18n="g.boot"></dt><dd data-i18n="g.hold"></dd>
+        </dl>
+        <button class="btn" id="keys-close" data-i18n="close"></button>
+      </div>
+    </div>
 
     <script type="module" src="main.js"></script>
   </body>
