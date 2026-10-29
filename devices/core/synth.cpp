@@ -33,11 +33,19 @@ const Note DONE_NOTES[] = {{0, 1046.5f, 0.28f, 0.32f, 0.2f}, {0.07f, 1568.f, 0.1
 // A turn failed: a falling fourth, low and dark, A4 then E4
 const Note ERROR_NOTES[] = {{0, 440.f, 0.48f, 0.35f, 0.1f}, {0.16f, 329.63f, 0.52f, 0.5f, 0.1f}};
 
+// Something rare: a bright run up C major, C5 to C6, landing on a high
+// C, G and C held together
+const Note LEGEND_NOTES[] = {{0, 523.25f, 0.3f, 0.35f, 0.4f},     {0.09f, 659.25f, 0.32f, 0.35f, 0.4f},
+                             {0.18f, 783.99f, 0.34f, 0.4f, 0.4f},  {0.27f, 1046.5f, 0.36f, 0.5f, 0.45f},
+                             {0.42f, 1046.5f, 0.3f, 0.9f, 0.5f},   {0.42f, 1568.f, 0.2f, 0.8f, 0.4f},
+                             {0.42f, 2093.f, 0.12f, 0.7f, 0.3f}};
+
 const Shape SHAPES[CUES] = {
     {ATTENTION_NOTES, 2, 1.4f},
     {REMIND_NOTES, 1, 1.0f},
     {DONE_NOTES, 2, 0.8f},
     {ERROR_NOTES, 2, 1.2f},
+    {LEGEND_NOTES, 7, 1.5f},
 };
 
 constexpr float TAIL_S = 0.7f;  // the reverb rings on this long after the notes

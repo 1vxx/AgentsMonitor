@@ -12,6 +12,11 @@
 // finger has been away ten seconds. Swiping sideways steps through them in
 // that order; dots along the bottom show where it is.
 //
+// The legend: five sessions at work at once, or ten turns in a row finished
+// well, turn one pet into a jade dragon for the rest of its session. It
+// arrives with a show of its own (a sweep across the sky trailing embers, a
+// dive, a burst, fire along the ground) and a chime of its own.
+//
 // A pet keeps its animal and its place for as long as its session lives.
 // Thinking it nods, running a tool it jitters and throws sparks, compacting
 // it squashes, waiting for you it hops under a "!", a finished turn makes it
@@ -54,6 +59,11 @@ using model::Status;
 const RGB WHITE = hex(0xeceaf6), DIM = hex(0x8a8ca8), AMBER = hex(0xffba46), GREEN = hex(0x8ce1a0), RED = hex(0xff6a5e),
           PINK = hex(0xff7ea0), TEAL = hex(0x6ee1d7), SMOKE = hex(0x9a9aa8);
 uint16_t white, dim, amber, green, red, pink, teal, smoke;
+// Each dragon coat's fire, from its white-hot core out to its edge, and its
+// accent for the dragon's words; coatNow says whose fire fireAt() gives
+RGB coatFire[sprites::COATS][4];
+uint16_t accent[sprites::COATS];
+int coatNow;
 
 constexpr int64_t TAKEOVER_MS = 10000;  // the alert's stay
 constexpr int64_t ROTATE_MS = 4000;     // between waiting pets on the alert
@@ -94,6 +104,8 @@ int cues[8], cueHead, cueTail;
 
 struct Pet {
   bool used, leaving, placed;
+  bool legend;   // it has become the dragon
+  uint8_t coat;  // and which of the dragon's coats it wears
   char key[96];
   int animal, order;
   Spring x, y, k;  // its place at home, in cells: centre column, top row, size
@@ -107,7 +119,18 @@ constexpr int PETS = model::MAX + 4;
 Pet pets[PETS];
 int arrivals;
 
-uint16_t inks[sprites::COUNT][128];
+constexpr int DRAGON = sprites::COUNT;  // the dragon's first place among the inks, one per coat
+uint16_t inks[sprites::COUNT + sprites::COATS][128];
+
+// The legend
+constexpr int CROWD = 5;          // this many at work at once calls the dragon
+constexpr int STREAK = 10;        // and so do this many turns in a row finished well
+constexpr float ARRIVE_S = 3.8f;  // its entrance
+int streak;                       // turns finished well since the last that failed
+bool crowded = true;              // CROWD at work at the last look; so at start-up, which doesn't call
+char legendKey[96];               // the session the dragon belongs to
+bool legendDue;                   // called, its entrance waiting for the alert to end
+int64_t legendAt = -100000;       // when its entrance began
 
 // Touch
 enum class Drag { None, Undecided, Slide, Move };
@@ -153,6 +176,35 @@ Pet *petOf(const char *key) {
 }
 
 bool online() { return linkState == ONLINE && haveSummary; }
+
+// Whether a pet shows as the dragon: once its entrance has begun
+bool dragonNow(const Pet &p) { return p.legend && !legendDue; }
+int lookOf(const Pet &p) { return dragonNow(p) ? DRAGON + p.coat : p.animal; }
+const sprites::Animal &looks(int which) { return which >= DRAGON ? sprites::DRAGON : sprites::ANIMALS[which]; }
+
+// A steady random number in [0, 1) for each n
+float noise(uint32_t n) {
+  n = n * 747796405u + 2891336453u;
+  n = ((n >> ((n >> 28) + 4)) ^ n) * 277803737u;
+  return float((n >> 22) ^ n) / 4294967296.f;
+}
+
+uint16_t mix565(uint16_t a, uint16_t b, float t) {
+  uint32_t k = uint32_t(gfx::clamp01(t) * 32 + 0.5f);
+  uint32_t r = (gfx::spread(a) * (32 - k) + gfx::spread(b) * k) >> 5 & 0x07E0F81F;
+  return uint16_t(r | r >> 16);
+}
+
+// The colour of the dragon's fire at f, 0 at its white-hot core to 1 at its
+// edge, in the coat it wears
+uint16_t fireAt(float f) {
+  f = gfx::clamp01(f);
+  const RGB *s = coatFire[coatNow];
+  RGB c = f < 0.33f   ? gfx::mix(s[0], s[1], f / 0.33f)
+          : f < 0.66f ? gfx::mix(s[1], s[2], (f - 0.33f) / 0.33f)
+                      : gfx::mix(s[2], s[3], (f - 0.66f) / 0.34f);
+  return gfx::c565(c);
+}
 
 // "mcp__server__tool" reads "server · tool"; in capitals
 void toolName(const char *tool, char *out, size_t n) {
@@ -456,6 +508,19 @@ void choose(const char *key) {
 
 // ---------- Following the summaries ----------
 
+// Makes the pet of `key` the dragon, unless one is about already
+void crown(const char *key) {
+  if (legendKey[0]) return;
+  Pet *p = petOf(key);
+  if (!p) return;
+  p->legend = true;
+  // A coat at random: the clocks, the steady one and the wall's, vary every call
+  uint32_t seed = hash(key) ^ uint32_t(nowMs) * 2654435761u ^ uint32_t(wallMs) * 40503u;
+  p->coat = uint8_t(int(noise(seed) * sprites::COATS) % sprites::COATS);
+  snprintf(legendKey, sizeof legendKey, "%s", key);
+  legendDue = true;
+}
+
 void follow(const model::Summary &next) {
   events::Event evs[2 * model::MAX];
   int n = tracker.follow(haveSummary ? &cur : nullptr, next, evs, 2 * model::MAX);
@@ -469,6 +534,12 @@ void follow(const model::Summary &next) {
       bool failed = e.outcome == Outcome::Error || e.outcome == Outcome::Refusal;
       if (e.outcome == Outcome::Answer || failed) pushCue(failed ? synth::ERROR : synth::DONE);
       if (Pet *p = petOf(e.key)) p->endAt = nowMs, p->endHow = e.outcome;
+      // Ten turns in a row finished well, across every session, call the dragon
+      if (e.outcome == Outcome::Answer) {
+        if (++streak >= STREAK) crown(e.key), streak = 0;
+      } else if (failed) {
+        streak = 0;
+      }
       snprintf(news.key, sizeof news.key, "%s", e.key);
       news.outcome = e.outcome;
       news.at = nowMs;
@@ -544,8 +615,11 @@ void step(float dt) {
   }
   for (Pet &p : pets)
     if (p.used && p.leaving) {
-      p.shown -= dt * 1.4f;
-      if (p.shown <= 0) p.used = false;
+      p.shown -= dt * (p.legend ? 0.8f : 1.4f);  // the dragon takes its time flying off
+      if (p.shown <= 0) {
+        if (p.legend) legendKey[0] = 0, legendDue = false;
+        p.used = false;
+      }
     }
 
   // Reminders for waits nobody has answered call the pet back out
@@ -580,6 +654,27 @@ void step(float dt) {
     if (had && to == ONE && drag != Drag::Slide) slide.x = 48, slide.v = 0;
   }
 
+  // Five at work at once, as they get there, call the dragon to the newest
+  int busy = 0;
+  const Session *newest = nullptr;
+  for (int i = 0; i < cur.count; i++) {
+    const Session &o = cur.sessions[i];
+    if (!model::working(o.status) || o.stale) continue;
+    busy++;
+    if (!newest || o.since > newest->since) newest = &o;
+  }
+  bool crowd = online() && busy >= CROWD;
+  if (crowd && !crowded && newest) crown(newest->key);
+  crowded = crowd;
+  // Its entrance, on ONE, once nobody waits on the alert
+  if (legendDue && to != ALERT && drag == Drag::None) {
+    legendDue = false;
+    legendAt = nowMs;
+    pushCue(synth::LEGEND);
+    choose(legendKey);
+    go(ONE);
+  }
+
   // All quiet for a while, the board dims; lost, it dims a little
   for (int i = 0; i < cur.count; i++)
     if (events::waiting(cur.sessions[i]) || model::working(cur.sessions[i].status)) busyAt = nowMs;
@@ -596,12 +691,16 @@ struct Box {
   int head;            // the top of its head, below any ears that stand above it
 };
 
-// The animal at size k, bottom-aligned on top + 10k, squashed from the top
-Box animal(int which, float cx, float top, float k, float squash, Eyes eyes, float a, int dx, int dy) {
-  const sprites::Animal &an = sprites::ANIMALS[which];
+// The animal at size k, bottom-aligned on top + 10k, squashed from the top;
+// `flap`, its wings down; `glow`, how far it is white-hot
+Box animal(int which, float cx, float top, float k, float squash, Eyes eyes, float a, int dx, int dy, bool flap = false,
+           float glow = 0) {
+  const sprites::Animal &an = looks(which);
+  const char *const *art = flap && an.flap[0] ? an.flap : an.rows;
   int h = 0;
-  while (h < sprites::MAX_ROWS && an.rows[h]) h++;
-  int cols = iround(sprites::W * k), full = iround(h * k);
+  while (h < sprites::MAX_ROWS && art[h]) h++;
+  float kk = an.fine ? k / 2 : k;  // a fine animal's pixels are half the size
+  int w = int(strlen(art[0])), cols = iround(w * kk), full = iround(h * kk);
   if (cols < 1) cols = 1;
   int rows = iround(full * squash);
   if (rows < 1) rows = 1;
@@ -609,19 +708,25 @@ Box animal(int which, float cx, float top, float k, float squash, Eyes eyes, flo
   const uint16_t *ink = inks[which];
   for (int yy = 0; yy < rows; yy++) {
     int sy = yy * h / rows;
-    const char *line = an.rows[sy];
+    const char *line = art[sy];
     for (int xx = 0; xx < cols; xx++) {
-      int sx = xx * sprites::W / cols;
+      int sx = xx * w / cols;
       char ch = line[sx];
       if (ch == 'E') {
-        bool up = sy > 0 && an.rows[sy - 1][sx] == 'E', down = sy < h - 1 && an.rows[sy + 1][sx] == 'E';
+        bool up = sy > 0 && art[sy - 1][sx] == 'E', down = sy < h - 1 && art[sy + 1][sx] == 'E';
         if ((eyes == SHUT && !up) || (eyes == SMILE && !down))
           ch = an.lid;
-        else
-          continue;
+        else if (!ink['E'])
+          continue;  // a dark eye; glowing ones have an ink
       }
       if (ch == '.') continue;
-      board::light(x0 + xx, y0 + yy, ink[uint8_t(ch) & 127], ch == 'C' ? a * 0.75f : a);
+      uint16_t c = ink[uint8_t(ch) & 127];
+      // Stars come and go in the cosmic dragon's wings
+      if (which == DRAGON + sprites::COSMIC && (ch == 'W' || ch == 'M') &&
+          noise(uint32_t(sx * 31 + sy * 977) + uint32_t(nowMs / 350) * 7919) > 0.94f)
+        c = white;
+      if (glow > 0) c = mix565(c, gfx::c565(coatFire[which >= DRAGON ? which - DRAGON : 0][0]), glow);
+      board::light(x0 + xx, y0 + yy, c, ch == 'C' ? a * 0.75f : a);
     }
   }
   return {x0, y0, x0 + cols, bottom, bottom - iround(sprites::BASE_ROWS * k * squash)};
@@ -641,8 +746,11 @@ void block(int x, int y, int u, uint16_t c, float a) {
     for (int w = 0; w < u; w++) board::light(x + w, y + v, c, a);
 }
 
-void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
+void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int which = -1, float glow = 0) {
   Act act = actOf(p, s);
+  if (which < 0) which = lookOf(p);
+  bool dragon = which >= DRAGON;
+  if (dragon) coatNow = which - DRAGON;
   float t = nowMs / 1000.f + p.phase;
   int u = iround(at.k / 2) < 1 ? 1 : iround(at.k / 2);  // cells a pixel for its marks
   Eyes eyes = fmodf(t * 0.27f, 1) < 0.035f ? SHUT : OPEN;  // a blink now and then
@@ -664,7 +772,21 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
       break;
     case NAP: eyes = SHUT, a *= 0.55f, squash = 1 - 0.05f * (0.5f + 0.5f * sinf(t * 1.3f)); break;  // breathing
     case DARK: eyes = SHUT, a *= 0.32f; break;
-    case GONE: eyes = SMILE, a *= 0.6f; break;
+    case GONE:
+      if (dragon) {
+        float g = (nowMs - p.goneAt) / 1000.f;  // it beats its wings and is off
+        dy = -iround(g * g * 45);
+      } else {
+        eyes = SMILE, a *= 0.6f;
+      }
+      break;
+  }
+  // The dragon's wings: a beat or two now and then, all the time while it
+  // waits or flies off
+  bool flap = false;
+  if (dragon) {
+    float f = fmodf(t, 2.6f);
+    flap = act == WAIT || act == GONE ? (int(t * 9) & 1) : (f < 0.5f && (int(f * 8) & 1));
   }
   // Arriving, it hops in; poked, it hops
   float born = (nowMs - p.bornAt) / 1000.f, poke = (nowMs - p.pokeAt) / 1000.f;
@@ -682,7 +804,18 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
     board::light(sx + q, ground, dim, 0.5f * edge * a);
   }
 
-  Box b = animal(p.animal, at.cx, at.top, at.k, squash, eyes, a, dx, dy);
+  // Embers rise round the dragon, behind it
+  if (dragon && act != DARK) {
+    int e = at.k >= 3 ? 2 : 1;
+    for (int q = 0; q < 6; q++) {
+      float cyc = t * 0.42f + q / 6.f, ph = cyc - floorf(cyc);
+      float x = at.cx + (noise(q * 101 + uint32_t(cyc) * 7) - 0.5f) * 15 * at.k + sinf(ph * 9 + q) * at.k * 0.5f;
+      float y = ground - 2 - ph * (sprites::BASE_ROWS * at.k + 6);
+      block(iround(x), iround(y), e, fireAt(0.2f + ph * 0.8f), 0.75f * sinf(ph * 3.14159f) * a);
+    }
+  }
+
+  Box b = animal(which, at.cx, at.top, at.k, squash, eyes, a, dx, dy, flap, glow);
 
   // Marks sit by its head; on a large pet, lower, clear of the round's edge
   int side = b.head + (at.k >= 3 ? 3 * u : 0);
@@ -691,7 +824,16 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
     case THINK:  // three dots by its head, one lit after another
       for (int q = 0; q < 3; q++) block(b.x1 + u + q * 2 * u, side + u, u, white, (int(t * 3) % 4 > q ? 0.85f : 0.18f) * a);
       break;
-    case TOOL:  // sparks thrown up and out
+    case TOOL:  // sparks thrown up and out; the dragon breathes fire out of its snout
+      if (dragon) {
+        float my = b.y1 - 7 * at.k * squash;  // its mouth, at the front of its snout
+        for (int q = 0; q < 9; q++) {
+          ph = fmodf(t * 2.6f + q / 9.f, 1);
+          float spread = (noise(q * 13 + uint32_t(t * 2.6f + q / 9.f)) - 0.5f) * ph * 3 * at.k;
+          block(b.x1 + iround(ph * 6 * at.k), iround(my + spread), u, fireAt(ph), (1 - ph * ph) * a);
+        }
+        break;
+      }
       for (int q = 0; q < 3; q++) {
         ph = fmodf(t * 1.8f + q / 3.f, 1);
         float ang = -2.0f + q * 1.0f, r = (b.x1 - b.x0) / 2.f + ph * 5 * u;
@@ -709,7 +851,15 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
       mark(sprites::PUFF, 4, b.x1 + u, side - iround(since * 1.5f * u), u, smoke, 0.8f * fade * a);
       break;
     }
-    case NAP:  // Zs drifting up
+    case NAP:  // Zs drifting up; smoke curling from the dragon's nostril
+      if (dragon) {
+        for (int q = 0; q < 4; q++) {
+          ph = fmodf(t * 0.5f + q / 4.f, 1);
+          float x = b.x1 - at.k + ph * 2 * at.k + sinf(ph * 7 + q) * at.k * 0.6f, y = b.y1 - 7.5f * at.k - ph * 5 * at.k;
+          block(iround(x), iround(y), u, smoke, 0.45f * (1 - ph) * a / 0.55f);
+        }
+        break;
+      }
       for (int q = 0; q < 2; q++) {
         ph = fmodf(t * 0.35f + q * 0.5f, 1);
         board::tiny("Z", float(b.x1 + u + iround(ph * 3 * u)), side + 3 * u - iround(ph * 6 * u), white, 0.6f * (1 - ph) * a / 0.55f, u);
@@ -720,6 +870,96 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press) {
       break;
     default: break;
   }
+}
+
+// ---------- The dragon's entrance ----------
+
+// A ring of dots r cells round (cx, cy)
+void ring(float cx, float cy, float r, uint16_t c, float a) {
+  int n = int(r * 6.3f) + 8;
+  for (int q = 0; q < n; q++) {
+    float ang = q * 6.2832f / n;
+    board::light(iround(cx + cosf(ang) * r), iround(cy + sinf(ang) * r), c, a);
+  }
+}
+
+// Fire running out along the ground both ways from cx, f seconds after it
+// caught, flickering, then dying down
+void groundFire(float cx, int ground, float f, float a) {
+  float reach = gfx::clamp01(f / 0.3f) * 46, fade = f < 1.0f ? 1 : gfx::clamp01((1.5f - f) / 0.5f);
+  uint32_t tick = uint32_t(nowMs / 50);
+  for (int x = -iround(reach); x <= iround(reach); x++) {
+    float d = fabsf(float(x)) / 46;
+    float h = (1.5f + 5 * (1 - d)) * (0.45f + 0.55f * noise(uint32_t(x + 200) * 31 + tick)) * fade;
+    for (int y = 0; y < iround(h); y++)
+      board::light(iround(cx) + x, ground - y, fireAt(y / h * 0.9f + d * 0.3f), a * (1 - 0.5f * y / h));
+  }
+}
+
+// The dragon's entrance, e seconds in, onto pet p's place on ONE: it sweeps
+// across the sky trailing embers, dives onto the pet, lands white-hot in a
+// burst of rings and sparks that takes the old animal's place, and sets the
+// ground alight
+void entrance(const Pet &p, const Session *s, Pose at, float a, float e) {
+  constexpr float SWEEP0 = 0.25f, SWEEP1 = 1.3f, DIVE0 = 1.4f, LAND = 1.8f;
+  int me = DRAGON + p.coat;
+  coatNow = p.coat;  // its trail, rings, sparks and ground fire, in its coat's fire
+  float cy = at.top + 5 * at.k;  // the middle of the pet
+  int ground = iround(at.top + sprites::BASE_ROWS * at.k) + 1;
+  // Until the dragon lands, the old animal stands there
+  if (e < LAND) drawPet(p, s, at, a, false, p.animal);
+  // A sweep across the sky, left to right, embers streaming behind
+  if (e >= SWEEP0 && e < SWEEP1 + 0.35f) {
+    auto path = [](float u, float &x, float &y) {
+      x = lerp(-22, N + 22, u);
+      y = 24 - 30 * sinf(3.14159f * u);  // high over the pet's head
+    };
+    float u = (e - SWEEP0) / (SWEEP1 - SWEEP0);
+    for (int i = 1; i <= 18; i++) {
+      float ui = u - i * 0.02f, x, y;
+      if (ui < 0 || ui > 1) continue;
+      path(ui, x, y);
+      uint32_t n = uint32_t(i * 977 + int(e * 24));
+      board::light(iround(x + (noise(n) - 0.5f) * 4), iround(y + 10 + (noise(n + 1) - 0.5f) * 4), fireAt(i / 18.f),
+                   a * (1 - i / 19.f));
+    }
+    if (u <= 1) {
+      float x, y;
+      path(u, x, y);
+      animal(me, x, y, 2, 1, OPEN, a, 0, 0, int(e * 12) & 1);
+    }
+  }
+  // The dive, straight down onto the pet, growing as it comes
+  if (e >= DIVE0 && e < LAND) {
+    float v = (e - DIVE0) / (LAND - DIVE0);
+    v *= v;
+    float top = lerp(-46, at.top, v), k = lerp(2.4f, at.k, v);
+    for (int i = 1; i <= 12; i++) {
+      uint32_t n = uint32_t(i * 389 + int(e * 24));
+      board::light(iround(at.cx + (noise(n) - 0.5f) * 10 * k / at.k), iround(top - i * 2.5f), fireAt(i / 12.f), a * (1 - i / 13.f));
+    }
+    animal(me, at.cx, top, k, 1, OPEN, a, 0, 0, true, 0.35f);
+  }
+  if (e < LAND) return;
+  float l = e - LAND;
+  // The burst: two rings racing out and sparks flung wide
+  for (int r = 0; r < 2; r++) {
+    float lr = l - r * 0.14f;
+    if (lr > 0 && lr < 0.9f) ring(at.cx, cy, lr * 75, fireAt(0.15f + lr), a * (1 - lr / 0.9f));
+  }
+  if (l < 1.2f)
+    for (int q = 0; q < 28; q++) {
+      float ang = q * 6.2832f / 28 + noise(q) * 0.3f, sp = 28 + noise(q + 50) * 34;
+      float x = at.cx + cosf(ang) * sp * l, y = cy + sinf(ang) * sp * l + 30 * l * l;
+      board::light(iround(x), iround(y), fireAt(0.1f + l * 0.8f), a * (1 - l / 1.2f));
+    }
+  // The dragon itself: white-hot as it lands, crouched, then up
+  if (l < 0.45f)
+    animal(me, at.cx, at.top, at.k, 0.6f + 0.4f * l / 0.45f, OPEN, a, 0, 0, l > 0.2f, l < 0.15f ? 1 - l / 0.15f : 0);
+  else
+    drawPet(p, s, at, a, false, me);
+  // Then fire along the ground
+  if (l > 0.35f) groundFire(at.cx, ground, l - 0.35f, a);
 }
 
 // ---------- All ----------
@@ -745,12 +985,12 @@ void allText(float a) {
       snprintf(lines[m++], 64, "%d PETS NEED YOU", tracker.count);
       snprintf(lines[m++], 64, "%d NEED YOU", tracker.count);
     } else {
-      snprintf(lines[m++], 64, "%s NEEDS YOU", sprites::ANIMALS[p->animal].name);
+      snprintf(lines[m++], 64, "%s NEEDS YOU", looks(lookOf(*p)).name);
       snprintf(lines[m++], 64, "NEEDS YOU");
     }
     c = amber, al = 0.7f + 0.3f * sinf(t * 4);
   } else if (nowMs - news.at < NEWS_MS && petOf(news.key)) {
-    const char *who = sprites::ANIMALS[petOf(news.key)->animal].name;
+    const char *who = looks(lookOf(*petOf(news.key))).name;
     switch (news.outcome) {
       case Outcome::Answer: snprintf(lines[m++], 64, "%s IS DONE!", who), c = green, al = 0.9f; break;
       case Outcome::Error:
@@ -810,7 +1050,16 @@ void allText(float a) {
     board::tinyFit(name, sl.chars, fit, sizeof fit);
     uint16_t lc = act == THINK || act == PACK ? white : actColor(act);
     float la = act == NAP || act == DARK || act == GONE ? 0.45f : 0.8f;
-    board::tinyCentre(fit, p.x.x, iround(p.y.x + sprites::BASE_ROWS * p.k.x) + 4, lc, la * a * p.shown);
+    int ly = iround(p.y.x + sprites::BASE_ROWS * p.k.x) + 4;
+    if (dragonNow(p)) {
+      // The dragon's in its coat's colour, after a star
+      board::tinyFit(name, sl.chars - 2, fit, sizeof fit);
+      float x = p.x.x - (7 + board::tinyWidth(fit)) / 2.f;
+      board::font(text::PROP, "\xe2\x9c\xa6", x, ly + 6, accent[p.coat], la * a * p.shown);
+      board::tiny(fit, x + 7, ly, accent[p.coat], la * a * p.shown);
+    } else {
+      board::tinyCentre(fit, p.x.x, ly, lc, la * a * p.shown);
+    }
   }
 
   // What they have used between them
@@ -915,11 +1164,31 @@ void oneText(float a) {
   const Pet *p = petOf(oneKey);
   Act act = p ? actOf(*p, s) : NAP;
 
+  // The dragon's entrance: the words step back for its name, in its coat's colour
+  float le = p && dragonNow(*p) ? (nowMs - legendAt) / 1000.f : 99;
+  float hush = le < 0.3f ? 1 - 0.8f * le / 0.3f : le < ARRIVE_S ? 0.2f : le < ARRIVE_S + 0.6f ? 0.2f + 0.8f * (le - ARRIVE_S) / 0.6f : 1;
+  float banner = le < 2.0f ? 0 : le < 2.3f ? (le - 2.0f) / 0.3f : le < ARRIVE_S ? 1 : le < ARRIVE_S + 0.5f ? 1 - (le - ARRIVE_S) / 0.5f : 0;
+  if (banner > 0) {
+    const char *word = "LEGENDARY";
+    int w = text::width(text::PROP, 1, word), x0 = iround(cx - (w - 1) / 2.f);
+    // Its letters come up left to right, then a white glint runs over them
+    board::clip(x0, x0 + iround(gfx::clamp01((le - 2.0f) / 0.45f) * w), 0);
+    board::font(text::PROP, word, float(x0), 71, accent[p->coat], banner * a);
+    if (le > 2.5f) {
+      int gx = x0 - 6 + int(fmodf((le - 2.5f) * 45, float(w + 24)));
+      board::clip(gx, gx + 4, 0);
+      board::font(text::PROP, word, float(x0), 71, gfx::c565(coatFire[p->coat][0]), banner * a);
+    }
+    board::clip(0, N, 0);
+  }
+  float plain = a * (1 - banner);
+  a *= hush;
+
   // A new pet's lines start scrolling from the start
   if (strcmp(titleKey, oneKey)) snprintf(titleKey, sizeof titleKey, "%s", oneKey), titleSince = nowMs;
 
   // The title, on one line that scrolls when it is long
-  marquee(false, s->title[0] ? s->title : s->project, cx, 71, 100, white, 0.95f * a, titleSince);
+  marquee(false, s->title[0] ? s->title : s->project, cx, 71, 100, white, 0.95f * (a < plain ? a : plain), titleSince);
 
   // What it is doing; not connected, that first
   char opts[3][64], state[64];
@@ -962,10 +1231,15 @@ void oneText(float a) {
     char proj[64], agent[32], line[96], fit[96];
     text::upper(s->project, proj, sizeof proj);
     agentName(s->agent, agent, sizeof agent);
-    snprintf(line, sizeof line, "%s · %s", proj, agent);
-    if (board::tinyWidth(line) > roomAt(97)) snprintf(line, sizeof line, "%s", proj);
+    bool legend = p && dragonNow(*p);
+    // The dragon says which it is: "COSMIC DRAGON · AGENTSMONITOR"
+    if (legend)
+      snprintf(line, sizeof line, "%s DRAGON · %s", sprites::COAT[p->coat].name, proj);
+    else
+      snprintf(line, sizeof line, "%s · %s", proj, agent);
+    if (board::tinyWidth(line) > roomAt(97)) snprintf(line, sizeof line, legend ? "%s DRAGON" : "%s", legend ? sprites::COAT[p->coat].name : proj);
     board::tinyFit(line, roomAt(97) / 4, fit, sizeof fit);
-    board::tinyCentre(fit, cx, 95, white, 0.4f * a);
+    board::tinyCentre(fit, cx, 95, legend ? accent[p->coat] : white, (legend ? 0.8f : 0.4f) * a);
   }
 
   // A dot for each session in order, this one long, each in its state's colour
@@ -977,6 +1251,7 @@ void oneText(float a) {
       const Pet *op = petOf(o.key);
       uint16_t c = op ? actColor(actOf(*op, &o)) : dim;
       if (op && actOf(*op, &o) == NAP) c = white;
+      if (op && dragonNow(*op)) c = accent[op->coat];
       for (int q = 0; q < (here ? 3 : 1); q++) board::light(x + q, 104, c, (here ? 0.95f : 0.4f) * a);
       x += here ? 5 : 3;
     }
@@ -1007,7 +1282,13 @@ void compose() {
     float alpha = from == to ? alphaOn(to, p) : lerp(alphaOn(from, p), alphaOn(to, p), gfx::clamp01(t));
     alpha *= p.shown;
     if (alpha < 0.02f) continue;
-    drawPet(p, p.leaving ? nullptr : find(p.key), at, alpha, pressed == i && drag == Drag::Undecided);
+    const Session *ps = p.leaving ? nullptr : find(p.key);
+    float le = (nowMs - legendAt) / 1000.f;
+    if (dragonNow(p) && le < ARRIVE_S && from == ONE && to == ONE && !strcmp(p.key, oneKey)) {
+      entrance(p, ps, at, alpha, le);
+      continue;
+    }
+    drawPet(p, ps, at, alpha, pressed == i && drag == Drag::Undecided);
   }
 }
 
@@ -1127,6 +1408,13 @@ bool init(const uint8_t *cjk, size_t cjkLen) {
   for (int a = 0; a < sprites::COUNT; a++)
     for (const sprites::Ink &k : sprites::ANIMALS[a].inks)
       if (k.key) inks[a][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
+  for (int c = 0; c < sprites::COATS; c++) {
+    const sprites::Coat &coat = sprites::COAT[c];
+    for (const sprites::Ink &k : coat.inks)
+      if (k.key) inks[DRAGON + c][uint8_t(k.key) & 127] = gfx::c565(hex(k.rgb));
+    for (int f = 0; f < 4; f++) coatFire[c][f] = hex(coat.fire[f]);
+    accent[c] = gfx::c565(coatFire[c][1]);
+  }
   return true;
 }
 
@@ -1134,6 +1422,7 @@ void link(Link state) {
   if (state != ONLINE) {
     // Nothing on screen is current any more
     haveSummary = false;
+    crowded = true;
     tracker.clear();
     drag = Drag::None;
     pressed = -1;

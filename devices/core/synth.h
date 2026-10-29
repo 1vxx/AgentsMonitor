@@ -6,7 +6,7 @@
 // sound files and the review page plays the very samples the speaker will.
 namespace synth {
 
-enum Cue { ATTENTION, REMIND, DONE, ERROR, CUES };
+enum Cue { ATTENTION, REMIND, DONE, ERROR, LEGEND, CUES };
 constexpr int RATE = 24000;
 constexpr int MAX_SAMPLES = RATE * 9 / 4;
 

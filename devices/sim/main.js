@@ -8,7 +8,7 @@ import { World } from './world.js'
 
 const SIZE = 466
 const LINK = { connecting: 0, online: 1, lost: 2 }
-const CUE_NAMES = ['等你', '轻提醒', '完成', '出错']
+const CUE_NAMES = ['等你', '轻提醒', '完成', '出错', '传说']
 const $ = id => document.getElementById(id)
 
 // ---------- The module ----------

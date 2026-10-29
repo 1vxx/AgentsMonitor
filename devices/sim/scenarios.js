@@ -111,6 +111,41 @@ export const SCENARIOS = [
     ],
   },
   {
+    id: 'legend-crowd',
+    name: '传说：五个一起干活',
+    note: '四个会话在工作，3 秒时第五个开始：隐藏的飞龙登场，变成最新那个会话的宠物。上滑看全部，它的名字是金色的。',
+    length: 60,
+    script: [
+      [0, (w, n) => {
+        w.start(n, 'claude-code:a', t('Investigate UI stutter'))
+        w.start(n, 'claude-code:b', t('Theme switch polish'))
+        w.tool(n, 'claude-code:b', 'Edit')
+        w.start(n, 'claude-code:c', t('Live session ordering'))
+        w.start(n, 'codex:d', { project: 'agentsmon-device', title: 'Firmware Wi-Fi setup', agent: 'codex' })
+      }],
+      [3, (w, n) => w.start(n, 'claude-code:e', t('Daemon DB growth and event retention'))],
+      [12, (w, n) => w.tool(n, 'claude-code:e', 'Bash')],
+      [20, (w, n) => w.finish(n, 'claude-code:e')],
+      [40, (w, n) => w.end('claude-code:e')],
+    ],
+  },
+  {
+    id: 'legend-streak',
+    name: '传说：十连胜',
+    note: '一个会话每 2 秒顺利完成一轮，连续 10 轮（约 20 秒）后飞龙登场。',
+    length: 40,
+    script: [
+      [0, (w, n) => {
+        w.start(n, 'claude-code:a', t('Count quotas from logs'))
+        w.finished(n, 'claude-code:b', t('Translate README to Chinese'), 'answer', 300_000)
+      }],
+      ...Array.from({ length: 10 }, (_, i) => [
+        [1 + 2 * i, (w, n) => w.prompt(n, 'claude-code:a')],
+        [2 + 2 * i, (w, n) => w.finish(n, 'claude-code:a')],
+      ]).flat(),
+    ],
+  },
+  {
     id: 'empty',
     name: '没有会话',
     note: '连接正常但没有任何会话：灰色光球缓慢呼吸。',
