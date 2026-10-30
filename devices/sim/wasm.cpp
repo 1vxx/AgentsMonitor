@@ -1,12 +1,20 @@
-// The UI core's C interface for the review page. The page owns the font
-// buffer (it must outlive the module) and reads frames and chimes back out of
-// the module's memory.
+// The UI core's C interface for the review page. The page owns the font and
+// theme data buffers (they must outlive the module) and reads frames and
+// chimes back out of the module's memory.
 
 #include <emscripten.h>
 
 #include "gfx.h"
+#include "jpeg.h"
 #include "synth.h"
 #include "ui.h"
+
+// The page decodes photos with the browser's own decoder, which only works
+// asynchronously: a frame not decoded yet is false now, on its way, and
+// ready a frame or two later. Without a page to ask (snap.mjs), always false.
+EM_JS(int, pageJpeg, (const uint8_t *jpg, int len, uint16_t *out, int w, int h), {
+  return Module.decodeJpeg ? Module.decodeJpeg(jpg, len, out, w, h) : 0;
+});
 
 namespace {
 uint16_t fb[gfx::W * gfx::H];
@@ -15,11 +23,16 @@ int16_t pcm[synth::MAX_SAMPLES];
 double drawMs;
 char seenKey[96];
 double seenEnded;
+
+bool decodeOnPage(const uint8_t *jpg, size_t len, uint16_t *out, int w, int h) { return pageJpeg(jpg, int(len), out, w, h); }
 }  // namespace
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE int am_init(const uint8_t *cjk, int cjkLen) { return ui::init(cjk, cjkLen); }
+EMSCRIPTEN_KEEPALIVE int am_init(const uint8_t *cjk, int cjkLen, const uint8_t *data, int dataLen) {
+  jpeg::decode = decodeOnPage;
+  return ui::init(cjk, cjkLen, data, data ? size_t(dataLen) : 0);
+}
 
 EMSCRIPTEN_KEEPALIVE void am_link(int state) { ui::link(ui::Link(state)); }
 

@@ -3,7 +3,8 @@
 // a scripted world or from the daemon itself. page.js keeps the page around it.
 
 import { apply, lang, pick, setLang, t } from './i18n.js'
-import { $, cycleMode, drawDial, keysOpen, onKey, save, saved, segmented, showKeys, showMode, themeMenu, toast } from './page.js'
+import { jpegDecoder } from './jpeg.js'
+import { $, cycleMode, drawDial, keysOpen, onKey, packMenu, save, saved, segmented, showKeys, showMode, themeMenu, toast } from './page.js'
 import { SCENARIOS } from './scenarios.js'
 import { World } from './world.js'
 
@@ -28,8 +29,24 @@ const menu = themeMenu(THEMES, theme, pick, next => {
   url.searchParams.set('theme', next.id)
   location.href = url.href
 })
+// The theme's photo packs (devices/tools/face_pack.py --name), if it has
+// any: the one asked for (?pack=), else the last one shown, else the first;
+// another one reloads the page with it
+const PACKS = await fetch(`build/${theme.id}-packs/index.json`, { cache: 'no-cache' }).then(r => (r.ok ? r.json() : [])).catch(() => [])
+const askedPack = new URLSearchParams(location.search).get('pack') || saved(`am.pack.${theme.id}`)
+const pack = PACKS.find(x => x.name === askedPack) ?? PACKS[0]
+const packs = pack
+  ? packMenu(PACKS, pack, next => {
+      const url = new URL(location.href)
+      url.searchParams.set('pack', next.name)
+      location.href = url.href
+    })
+  : null
+if (pack) save(`am.pack.${theme.id}`, pack.name)
+$('pack-picker').hidden = !pack
 const describeTheme = () => {
   menu.describe()
+  packs?.describe()
   $('theme-title').textContent = pick(theme.name)
   $('theme-about').textContent = `${pick(theme.about)} ${t('by', { author: theme.author })}`
 }
@@ -46,8 +63,15 @@ const copyIn = bytes => {
 }
 
 const cjk = new Uint8Array(await fetch('../fonts/cjk10.bin').then(r => r.arrayBuffer()))
-// The font stays in the module's memory for good: text is drawn straight from it
-if (!mod._am_init(copyIn(cjk), cjk.length)) throw new Error('UI init failed')
+// The theme's own data, as a board keeps it in its data partition: the photo
+// pack picked, else build/<theme>.pack if there is one. Checked with the
+// server every time, since a pack made again keeps its name.
+const dataUrl = pack ? `build/${theme.id}-packs/${encodeURIComponent(pack.name)}.pack` : `build/${theme.id}.pack`
+const data = await fetch(dataUrl, { cache: 'no-cache' }).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)
+// Both stay in the module's memory for good: the core reads straight from them
+const dataAt = data ? copyIn(new Uint8Array(data)) : 0
+if (data) mod.decodeJpeg = jpegDecoder(mod, dataAt, data.byteLength)
+if (!mod._am_init(copyIn(cjk), cjk.length, dataAt, data ? data.byteLength : 0)) throw new Error('UI init failed')
 
 const cString = p => {
   let s = ''
@@ -520,7 +544,7 @@ segmented('lang', lang, v => {
 
 const SPEEDS = ['1', '3', '10', '30']
 onKey(e => {
-  if (menu.key(e)) return e.preventDefault()
+  if (menu.key(e) || packs?.key(e)) return e.preventDefault()
   if (keysOpen()) {
     if (e.key === 'Escape' || e.key === '?') showKeys(false)
     return

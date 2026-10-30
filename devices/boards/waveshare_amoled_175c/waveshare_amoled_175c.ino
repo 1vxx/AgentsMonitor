@@ -16,10 +16,12 @@
 
 #include "audio.h"
 #include "button.h"
+#include "data.h"
 #include "net.h"
 #include "panel.h"
 #include "src/cjk10.h"
 #include "src/ui/gfx.h"
+#include "src/ui/jpeg.h"
 #include "src/ui/synth.h"
 #include "src/ui/ui.h"
 #include "touch.h"
@@ -104,7 +106,10 @@ void setup() {
   panel::brightness(220);
 
   uint32_t t0 = millis();
-  if (!ui::init(CJK10, sizeof CJK10)) Serial.println("display: no memory for the UI");
+  size_t theirs = 0;
+  if (data::open(theirs)) Serial.printf("display: %u KB of theme data\n", unsigned(theirs / 1024));
+  jpeg::decode = data::decode;
+  if (!ui::init(CJK10, sizeof CJK10, nullptr, theirs, theirs ? data::read : nullptr)) Serial.println("display: no memory for the UI");
   Serial.printf("display: UI ready in %u ms\n", millis() - t0);
   if (!touch::begin()) Serial.println("display: touch not found");
   if (!button::begin()) Serial.println("display: power chip not found, PWR button off");

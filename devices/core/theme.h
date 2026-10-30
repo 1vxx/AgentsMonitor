@@ -36,6 +36,18 @@ struct State {
 };
 const State &state();
 
+// The theme's own data, as the board keeps it (a photo pack in its data
+// partition, say): there from init() on, or empty when the board has none.
+// len bytes, readable with read(); p points at them as well when they are in
+// memory whole (on the review page), and is null when the board can only
+// read them a piece at a time (flash past what its cache can map).
+struct Data {
+  const uint8_t *p = nullptr;
+  size_t len = 0;
+  bool (*read)(size_t at, void *out, size_t n) = nullptr;
+};
+const Data &data();
+
 // Queues a chime of the theme's own; the host already plays ATTENTION when a
 // session starts waiting, DONE or ERROR when a turn ends, and REMIND for a
 // wait nobody answers

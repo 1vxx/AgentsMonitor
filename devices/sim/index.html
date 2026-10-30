@@ -26,6 +26,14 @@
           <span class="brand-sub" data-i18n="title.short"></span>
         </a>
         <div class="tools">
+          <div class="picker" id="pack-picker" hidden>
+            <button class="pill" id="pack-btn" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="pack.pick">
+              <span class="pill-label" data-i18n="pack"></span>
+              <span class="pill-value" id="pack-name"></span>
+              <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+            </button>
+            <ul class="menu" id="pack-menu" role="listbox" hidden></ul>
+          </div>
           <div class="picker">
             <button class="pill" id="theme-btn" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="theme.pick">
               <span class="pill-dot" aria-hidden="true"></span>

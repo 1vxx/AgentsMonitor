@@ -61,6 +61,29 @@ export const SCENARIOS = [
     ],
   },
   {
+    id: 'long-day',
+    name: { en: 'A long day, answered late', zh: '漫长的一天，很晚才回' },
+    note: {
+      en: 'A session reads, thinks, compacts and edits, then at 24 s asks for approval and waits 26 minutes before it is answered; it finishes, nobody looks for 6½ minutes, it is opened, and then all goes quiet until bored and, 10 minutes after it finished, asleep. Play it at 30× (80 s).',
+      zh: '一个会话读文件、思考、压缩、改代码，24 秒时请求授权，26 分钟后才被处理；接着做完，6 分半没人看，然后被打开，之后一直没动静，直到无聊、做完 10 分钟后睡着。用 30× 播放（80 秒）。',
+    },
+    length: 2400,
+    script: [
+      [0, (w, n) => {
+        w.start(n, 'claude-code:a', t('Refactor the sync engine'))
+        w.tool(n, 'claude-code:a', 'Read')
+        w.finished(n, 'claude-code:b', t('Docs pass'), 'answer', 2 * 3_600_000)
+      }],
+      [4, (w, n) => w.think(n, 'claude-code:a')],
+      [8, (w, n) => w.touch(n, 'claude-code:a', { status: 'compacting', since: n })],
+      [16, (w, n) => w.tool(n, 'claude-code:a', 'Edit')],
+      [24, (w, n) => w.ask(n, 'claude-code:a', { tool: 'Bash', subject: 'git push --force-with-lease' })],
+      [1584, (w, n) => w.answer(n, 'claude-code:a')],
+      [1620, (w, n) => w.finish(n, 'claude-code:a')],
+      [2010, (w, n) => w.open(n, 'claude-code:a')],
+    ],
+  },
+  {
     id: 'many-waits',
     name: { en: 'Three waiting at once', zh: '三个会话同时等你' },
     note: {

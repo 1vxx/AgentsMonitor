@@ -12,8 +12,12 @@ namespace ui {
 enum Link { CONNECTING, ONLINE, LOST };
 enum Touch { DOWN, MOVE, UP };
 
-// cjk: the hanzi bitmap font, devices/fonts/cjk10.bin (Latin text needs nothing)
-bool init(const uint8_t *cjk, size_t cjkLen);
+// cjk: the hanzi bitmap font, devices/fonts/cjk10.bin (Latin text needs nothing).
+// data: the theme's own data, such as a photo pack, if the board keeps any:
+// in memory whole at `data`, which must last as long as the display runs, or
+// dataLen bytes the board reads a piece at a time with readData.
+bool init(const uint8_t *cjk, size_t cjkLen, const uint8_t *data = nullptr, size_t dataLen = 0,
+          bool (*readData)(size_t at, void *out, size_t n) = nullptr);
 void link(Link state);
 // A summary, or a WebSocket message carrying one; false if it can't be read
 bool summary(const char *json);

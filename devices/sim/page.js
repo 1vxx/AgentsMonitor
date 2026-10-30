@@ -58,34 +58,34 @@ export const segmented = (id, value, onChange) => {
   return set
 }
 
-// ---------- The theme menu ----------
+// ---------- The theme and photo pack menus ----------
 
-// A list of every theme with its description; choosing another calls onPick
-export const themeMenu = (themes, current, pick, onPick) => {
-  const button = $('theme-btn')
-  const menu = $('theme-menu')
+// A pill that opens a list of choices, each with a name, a tag and a line
+// about it; choosing another calls onPick
+const choiceMenu = (button, menu, value, items, current, fields, onPick) => {
   let active = 0
 
   const render = () => {
     menu.replaceChildren(
-      ...themes.map((theme, i) => {
+      ...items.map((item, i) => {
         const li = document.createElement('li')
         li.setAttribute('role', 'option')
-        li.setAttribute('aria-selected', String(theme === current))
+        li.setAttribute('aria-selected', String(item === current))
         li.classList.toggle('active', i === active)
-        for (const [cls, text] of [['n', pick(theme.name)], ['id', theme.id], ['d', pick(theme.about)]]) {
+        const [n, id, d] = fields(item)
+        for (const [cls, text] of [['n', n], ['id', id], ['d', d]]) {
           const span = document.createElement('span')
           span.className = cls
           span.textContent = text
           li.append(span)
         }
-        li.onclick = () => choose(theme)
+        li.onclick = () => choose(item)
         return li
       }),
     )
   }
   const open = () => {
-    active = themes.indexOf(current)
+    active = items.indexOf(current)
     render()
     menu.hidden = false
     button.setAttribute('aria-expanded', 'true')
@@ -94,9 +94,9 @@ export const themeMenu = (themes, current, pick, onPick) => {
     menu.hidden = true
     button.setAttribute('aria-expanded', 'false')
   }
-  const choose = theme => {
+  const choose = item => {
     close()
-    if (theme !== current) onPick(theme)
+    if (item !== current) onPick(item)
   }
 
   button.onclick = e => {
@@ -106,9 +106,9 @@ export const themeMenu = (themes, current, pick, onPick) => {
   document.addEventListener('click', e => !menu.hidden && !menu.contains(e.target) && close())
 
   return {
-    // Says the current theme again, in the current language
+    // Says the current choice again, in the current language
     describe: () => {
-      $('theme-name').textContent = pick(current.name)
+      value.textContent = fields(current)[0]
       if (!menu.hidden) render()
     },
     // Arrow keys, Enter and Escape while it is open; true if the key was its
@@ -116,14 +116,22 @@ export const themeMenu = (themes, current, pick, onPick) => {
       if (menu.hidden) return false
       if (e.key === 'Escape') close()
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        active = (active + (e.key === 'ArrowDown' ? 1 : themes.length - 1)) % themes.length
+        active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length
         render()
-      } else if (e.key === 'Enter') choose(themes[active])
+      } else if (e.key === 'Enter') choose(items[active])
       else return false
       return true
     },
   }
 }
+
+// Every theme with its description
+export const themeMenu = (themes, current, pick, onPick) =>
+  choiceMenu($('theme-btn'), $('theme-menu'), $('theme-name'), themes, current, x => [pick(x.name), x.id, pick(x.about)], onPick)
+
+// A theme's photo packs (devices/tools/face_pack.py --name): whose face it shows
+export const packMenu = (packs, current, onPick) =>
+  choiceMenu($('pack-btn'), $('pack-menu'), $('pack-name'), packs, current, x => [x.name, `${(x.size / 1e6).toFixed(1)} MB`, x.photo], onPick)
 
 // ---------- The dial round the device ----------
 

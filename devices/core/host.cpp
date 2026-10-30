@@ -47,6 +47,16 @@ void shared(const events::Event &e) {
 
 const State &state() { return st; }
 
+Data blob;
+const Data &data() { return blob; }
+
+// Reading data that is in memory whole
+bool readMemory(size_t at, void *out, size_t n) {
+  if (at > blob.len || n > blob.len - at) return false;
+  memcpy(out, blob.p + at, n);
+  return true;
+}
+
 void chime(synth::Cue cue) {
   int next = (cueTail + 1) % 8;
   if (next == cueHead) return;
@@ -78,7 +88,10 @@ namespace ui {
 
 using theme::st;
 
-bool init(const uint8_t *cjk, size_t cjkLen) { return gfx::init() && text::init(cjk, cjkLen) && theme::instance().init(); }
+bool init(const uint8_t *cjk, size_t cjkLen, const uint8_t *data, size_t dataLen, bool (*readData)(size_t, void *, size_t)) {
+  theme::blob = {data, data || readData ? dataLen : 0, readData ? readData : data ? theme::readMemory : nullptr};
+  return gfx::init() && text::init(cjk, cjkLen) && theme::instance().init();
+}
 
 void link(Link state) {
   if (state != ONLINE) {
