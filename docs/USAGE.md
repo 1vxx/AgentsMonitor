@@ -12,6 +12,9 @@ English | [简体中文](USAGE.zh-CN.md)
 - [Data retention](#data-retention) · [Security and privacy](#security-and-privacy) · [Performance](#performance)
 - [Troubleshooting](#troubleshooting)
 
+> [!TIP]
+> **Or ask your agent.** All of this is written down, so Claude Code or Codex can look it up and do it for you. The [recipes](RECIPES.md) have prompts for the usual jobs.
+
 ---
 
 ## Installing in detail
@@ -237,6 +240,8 @@ The monitor must never slow an agent down:
 - Claude Code's transcripts and Codex's session logs are read every 2 s, only what each file gained, and only lines that name a reply, a token or a session record are parsed. Files not written to for a day are looked at once a minute, and a folder is listed again only when it changed. Files are read through a 64 KB buffer, so memory does not grow with them. Measured with 730 transcripts (845 MB): the first run counts their 12,000 requests in 0.9 s of CPU with a 26 MB peak; after that, reading them costs about 20 ms of CPU a minute.
 
 ## Troubleshooting
+
+Hand any of these to your agent: [the recipes](RECIPES.md#-when-something-is-off) tell it where to look, and it will happily read the logs for you.
 
 | Problem | What to do |
 | --- | --- |

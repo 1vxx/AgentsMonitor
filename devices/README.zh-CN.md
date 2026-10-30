@@ -1,14 +1,15 @@
 # 📟 显示设备
 
-一块摆在桌上的小屏幕，显示你的编码代理在干什么：有代理等你时会亮起来，一轮完成时会响一声，滑一滑就能翻看每个会话。
+一块摆在桌上的小屏幕，显示你的编码 Agent 在干什么：有 Agent 等你时会亮起来，一轮完成时会响一声，滑一滑就能翻看每个会话。
 
 [English](README.md) | 简体中文
 
 <p align="center">
-  <img src="../docs/assets/halo-home.png" width="180" alt="halo：情绪光球">
-  <img src="../docs/assets/halo-approve.png" width="180" alt="halo：一个会话请求运行命令">
-  <img src="../docs/assets/pets.png" width="180" alt="pets：每个会话一只像素小动物">
-  <img src="../docs/assets/halo-session.png" width="180" alt="halo：一个会话的 token 和上下文">
+  <img src="../docs/assets/halo-home.png" width="150" alt="halo：情绪光球">
+  <img src="../docs/assets/halo-approve.png" width="150" alt="halo：一个会话请求运行命令">
+  <img src="../docs/assets/pets.png" width="150" alt="pets：每个会话一只像素小动物">
+  <img src="../docs/assets/state-her-done.png" width="150" alt="her：眨眼笑着，等你夸她">
+  <img src="../docs/assets/halo-session.png" width="150" alt="halo：一个会话的 token 和上下文">
 </p>
 
 > [!NOTE]
@@ -25,6 +26,10 @@
 | 别的 ESP32 和一块屏幕 | [移植到你的开发板](#路线-a换一块-esp32-开发板) | 🛠️ 一个下午 |
 | 树莓派、墨水屏、M5Stack、旧手机…… | [直接读 API](#路线-c任何能发-http-请求的东西) | 🐍 约 20 行代码 |
 | 一个新外观的点子 | [做一个主题](themes/README.zh-CN.md) | 🎨 五分钟起步 |
+| 想换一张脸 | [给 Her 换脸](themes/her/README.zh-CN.md#-给她换张脸) | 📸 约 20 分钟 |
+
+> [!TIP]
+> **这里每一行都可以交给 Agent。** Claude Code 或 Codex 能装工具、刷开发板、读日志、写驱动。贴一道[菜谱](../docs/RECIPES.zh-CN.md)，然后去忙别的吧。
 
 ## 🎮 在浏览器里试试
 
@@ -37,7 +42,7 @@ devices/sim/build.sh                       # 构建所有主题
 python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 ```
 
-打开 http://127.0.0.1:8466，在顶部选择主题。在圆屏上拖动就是滑动，点击就是轻点，按键盘 `B` 相当于按侧键，按 `?` 查看全部快捷键。页面跟随系统的浅色或深色模式，也可以在顶部手动切换。想看自己的会话，把数据来源切换到实时 daemon（`ws://127.0.0.1:7788/v1/ws`，设置了令牌的话再填上令牌）。手边没有在跑的代理？[`scripts/demo.py`](../docs/USAGE.zh-CN.md#演示模式) 会启动一个装满虚构会话的守护进程，让预览页连上它。
+打开 http://127.0.0.1:8466，在顶部选择主题。在圆屏上拖动就是滑动，点击就是轻点，按键盘 `B` 相当于按侧键，按 `?` 查看全部快捷键。页面跟随系统的浅色或深色模式，也可以在顶部手动切换。想看自己的会话，把数据来源切换到实时 daemon（`ws://127.0.0.1:7788/v1/ws`，设置了令牌的话再填上令牌）。手边没有在跑的 Agent？[`scripts/demo.py`](../docs/USAGE.zh-CN.md#演示模式) 会启动一个装满虚构会话的守护进程，让预览页连上它。
 
 > 在 Claude Desktop 中，`.claude/launch.json` 里的 `device` 配置会启动这个页面。
 
@@ -49,6 +54,7 @@ python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 | --- | --- | --- |
 | <img src="../docs/assets/halo-home.png" width="96" alt=""> | **`halo`**（默认） | 一颗发光的球，颜色代表总体状态，每个会话是外圈轨道上的一颗卫星。有会话开始等你时，它会占满屏幕，告诉你它想运行什么。上滑打开列表，点一行就能看它的 token 和上下文。 |
 | <img src="../docs/assets/pets-approve.png" width="96" alt=""> | **`pets`** | 每个会话是 LED 点阵上的一只像素小动物，用动作表演自己的状态：思考时点头，跑工具时抖动、冒火花，等你时带着 `!` 蹦跳，空闲时打盹。上滑可以看到全体成员。据说里面藏着一条龙 🐉 |
+| <img src="../docs/assets/state-her-done.png" width="96" alt=""> | **[`her`](themes/her/README.zh-CN.md)** | 你的 Agent 化身女朋友，真人质感，25 个表情都由程序从一张照片算出来。Agent 思考时她低头打字，完成时她眨眼，你不理她，她就从“宝，在吗？”一路升级到“没事，我很好。”。她的脸可以随便换。 |
 
 想要自己的外观？[主题指南](themes/README.zh-CN.md)带你从复制模板开始，一直到把自己的主题刷到开发板上，还介绍了接口、工具箱和检查方法。
 
@@ -62,6 +68,8 @@ python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 | 侧键（上方）按一下 | 跳到最需要你的会话 |
 | 侧键连按两下 | 同时看所有会话 |
 | 下方按键按住 3 秒 | 召唤主题为稀有时刻准备的东西 |
+
+`her` 的点击是留给她自己的：见[和她互动](themes/her/README.zh-CN.md#-和她互动)。
 
 **声音**：有会话开始等你时响一声，一轮完成时轻轻响一声，一轮出错时低沉地响一声。等待一直没人处理的话，会在 2 分钟、5 分钟时再提醒，之后每 10 分钟一次，直到你轻点屏幕。
 
@@ -121,6 +129,8 @@ THEME=pets PORT=/dev/cu.usbmodem1101 ./build.sh --upload  # 或者其他任何�
 
 不加 `--upload` 就只编译。开发板启动时会轻轻响一声，连上 Wi-Fi 后几秒内就会显示你的会话。🎉
 
+`her` 还要多一步，写入她的照片：`./build.sh --pack demo`。大约 3 分钟，只有照片包变了才需要再做。
+
 ### 故障排查
 
 | 现象 | 检查什么 |
@@ -131,6 +141,9 @@ THEME=pets PORT=/dev/cu.usbmodem1101 ./build.sh --upload  # 或者其他任何�
 | 串口日志里有 `401` | `secrets.h` 里的令牌和 `http.token` 不一致 |
 | 想看日志 | `arduino-cli monitor -p <port> -c baudrate=115200` 每秒打印连接状态、帧率和剩余内存 |
 | 上传时找不到开发板 | 按住 BOOT 再插上数据线，然后重新上传 |
+| `her` 只显示一个剪影 | 她的照片还没写进开发板：`./build.sh --pack demo` |
+
+还是没解决？串口日志可以让 Agent 帮你读：贴上[连接菜谱](../docs/RECIPES.zh-CN.md#显示设备连不上)就行。
 
 ## 🧰 改成你自己的
 
@@ -138,7 +151,7 @@ THEME=pets PORT=/dev/cu.usbmodem1101 ./build.sh --upload  # 或者其他任何�
 
 ```
 devices/
-├── themes/    🎨 画什么、怎么动：halo、pets，以及新主题的起步模板
+├── themes/    🎨 画什么、怎么动：halo、pets、her，以及新主题的起步模板
 │                 _template；每个都实现 core/theme.h
 ├── core/      🧮 可移植的 C++17，不依赖任何平台：
 │                 host.cpp   开发板看到的显示设备（ui.h），由主题驱动
@@ -148,12 +161,15 @@ devices/
 │   └── waveshare_amoled_175c/       ← 唯一和硬件相关的代码
 ├── sim/       🎮 预览页（同一份代码的 WebAssembly 版）和 snap.mjs
 ├── fonts/     🔤 中文标题用的点阵字体（拉丁字母是内置的）
-└── tools/     🧪 new_theme.sh，以及各开发板共用的构建工具
+└── tools/     🧪 new_theme.sh、face_pack.py，以及各开发板共用的构建工具
 ```
 
 主题和开发板可以自由组合：任何主题都能跑在屏幕合适的任何开发板上。你只需要改你想改的那一层。
 
 ### 路线 A：换一块 ESP32 开发板
+
+> [!TIP]
+> 这是交给 Agent 最过瘾的活：把开发板的资料和[移植菜谱](../docs/RECIPES.zh-CN.md#移植到别的板子)给它，然后审查结果就好。
 
 把 `boards/waveshare_amoled_175c/` 复制成 `boards/<你的开发板>/`，把 `.ino` 改成和目录同名，然后替换驱动。sketch 只需要做这些事：
 
@@ -166,6 +182,7 @@ devices/
 | 按键 | 侧键用 `ui::press(ms)`，长按用 `ui::summon(ms)` | 可选 |
 | 声音 | 用 `core/synth` 把每个 `ui::cue()` 从扬声器播出来 | 可选 |
 | 已读 | 把每个 `ui::seen(key, len, &endedAt)` 用 `POST /v1/sessions/<key>/seen` 发给 daemon，带上 `{"ended_at": endedAt}`，这样在屏幕上点过的那一轮在所有地方都不再算新的 | 可选 |
+| 主题数据 | 主题的数据大到放不进固件时，比如 `her` 的照片：把长度和读取函数传给 `ui::init`，并设置 `jpeg::decode`（见 `data.cpp`） | 可选 |
 
 `net.cpp`（通过 Wi-Fi 轮询）和 `.ino` 里的帧循环通常可以原样沿用。**核心代码的要求：** ESP32-S3 级别、带 PSRAM 的芯片，核心会在 PSRAM 里放 1 MB 以上的缓冲。第二个核心是可选的：有两个核心时绘制会分摊到两个核心上（`gfx::split`），只有一个时就先画一半再画另一半。
 
@@ -227,7 +244,7 @@ while True:
     time.sleep(1)
 ```
 
-每秒轮询一次就足够了。想要即时更新，可以连接 `/v1/ws` 这个 WebSocket（带上 `?token=`），监听 `summary` 消息。每个字段的说明见[协议与 API](../docs/PROTOCOL.md)（英文）。
+每秒轮询一次就足够了。想要即时更新，可以连接 `/v1/ws` 这个 WebSocket（带上 `?token=`），监听 `summary` 消息。每个字段的说明见[协议与 API](../docs/PROTOCOL.md)（英文）。或者省去打字：这也有[一道菜谱](../docs/RECIPES.zh-CN.md#用什么都能做个显示器)。
 
 ### 做一个主题
 

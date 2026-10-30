@@ -9,4 +9,5 @@
 - [ ] Tests and checks pass for the parts I changed
 - [ ] Docs updated, in English and Chinese where the guide has both (or noted below)
 - [ ] For device code: tried on the review page, and on hardware if I have it
-- [ ] No secrets or private session data in the diff or screenshots
+- [ ] No secrets, private session data or real people's faces in the diff or screenshots
+- [ ] Read the whole diff myself, if an agent wrote it

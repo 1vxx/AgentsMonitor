@@ -8,6 +8,7 @@ English | [简体中文](README.zh-CN.md)
   <tr>
     <td align="center"><img src="../../docs/assets/halo-home.png" width="170" alt="halo"><br><b><code>halo</code></b><br><sub>A glowing orb in the mood of all your sessions</sub></td>
     <td align="center"><img src="../../docs/assets/pets.png" width="170" alt="pets"><br><b><code>pets</code></b><br><sub>A pixel animal per session, acting out its state</sub></td>
+    <td align="center"><img src="../../docs/assets/state-her-done.png" width="170" alt="her"><br><b><a href="her/README.md"><code>her</code></a></b><br><sub>A girlfriend who notices you left her on read</sub></td>
     <td align="center"><img src="../../docs/assets/theme-starter.png" width="170" alt="starter"><br><b><code>_template</code></b><br><sub>The starter every new theme is copied from</sub></td>
   </tr>
 </table>
@@ -25,6 +26,12 @@ Open http://127.0.0.1:8466/sim/?theme=aurora and edit `devices/themes/aurora/ui.
 ```bash
 THEME=aurora devices/boards/waveshare_amoled_175c/build.sh --upload
 ```
+
+## 🤖 Or describe it to your agent
+
+Themes are a lovely job for an agent, because it can see what it makes: `snap.mjs png` gives it a picture of any moment, and `snap.mjs check` tells it whether the drawing is right. That leaves you as the art director.
+
+Paste the [theme recipe](../../docs/RECIPES.md#dream-up-a-theme) with your idea, then say what feels wrong, in plain words: *"the orb is too bright"*, *"waiting should feel more urgent"*. All 25 of `her`'s expressions were tuned exactly that way.
 
 ## 🧩 How a theme fits
 
@@ -77,6 +84,7 @@ And what the host offers a theme:
 | `theme::ack()` | Says the person has seen what waits, so the reminders stop |
 | `theme::seen(key, endedAt)` | Says the person looked at a session's finished turn here; the board tells the daemon, so it stops being new everywhere |
 | `theme::reminders(out, max)` | The reminders due this frame, taken at the point in `frame()` where the theme reacts to them |
+| `theme::data()` | Data too big for the firmware, such as [Her's photos](her/README.md): a board reads it from flash a piece at a time, and the review page fetches it |
 
 ## 🧰 The toolbox in `core/`
 
@@ -89,8 +97,9 @@ And what the host offers a theme:
 | `spring.h` | The damped spring all motion uses |
 | `gesture.h` | One finger: taps, drags and their speed, with the thresholds every theme shares |
 | `synth.h` | The chimes |
+| `jpeg.h` | Decoding a photo, by the chip on a board and by the browser on the review page |
 
-`halo` shows smooth vector drawing with `gfx`. `pets` shows its own pixel grid (`board.cpp`) and pixel art (`sprites.h`). The starter shows the smallest complete theme.
+`halo` shows smooth vector drawing with `gfx`. `pets` shows its own pixel grid (`board.cpp`) and pixel art (`sprites.h`). `her` plays photos from a data pack, with text baked into it. The starter shows the smallest complete theme.
 
 ## ✅ What makes a good theme
 
@@ -98,8 +107,8 @@ And what the host offers a theme:
 - **No platform code.** No Arduino or ESP-IDF headers: the same files build for the browser and every board.
 - **Every state shows.** Waiting for approval or an answer, thinking, running a tool, compacting, finished, failed, idle, no signal, no sessions, connecting and link lost. The review page's demo scripts walk through all of them.
 - **Bands draw alike.** `draw()` reads only what `frame()` left, so drawing a frame in 16-row bands on two cores gives the same pixels as drawing it whole. `snap.mjs check` proves it.
-- **Fast enough.** Aim for 30 fps or better on the reference board; halo and pets run near 60. The board's serial log prints the frame rate and time every second. Big tables belong in PSRAM (`gfx::bigAlloc`): internal RAM is kept for Wi-Fi.
-- **Kind to an AMOLED.** Mostly black, and nothing bright in one place for hours. Both themes shift a few pixels every few minutes.
+- **Fast enough.** Aim for 30 fps or better on the reference board; halo and pets run near 60, and `her` about 36 with photos to decode. The board's serial log prints the frame rate and time every second. Big tables belong in PSRAM (`gfx::bigAlloc`): internal RAM is kept for Wi-Fi.
+- **Kind to an AMOLED.** Mostly black, and nothing bright in one place for hours. `halo` and `pets` shift a few pixels every few minutes, and `her` never holds still.
 - **One screen shape for now.** Themes draw a 466 × 466 round frame (`gfx::W`, `gfx::H`). See [other screen sizes](../README.md#path-b-another-screen-size-or-shape).
 
 ## 🧪 Test it

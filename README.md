@@ -50,6 +50,13 @@ AgentsMonitor answers it from the corner of your eye. A small round display besi
     <td align="center"><img src="docs/assets/state-pets-failed.png" width="150" alt="pets: a bunny under a puff of smoke, failed"></td>
   </tr>
   <tr>
+    <td align="center"><b><a href="devices/themes/her/README.md"><code>her</code></a></b></td>
+    <td align="center"><img src="docs/assets/state-her-working.png" width="150" alt="her: head down, running a command for you"></td>
+    <td align="center"><img src="docs/assets/state-her-waiting.png" width="150" alt="her: wide eyes, asking to run the command shown under her words"></td>
+    <td align="center"><img src="docs/assets/state-her-done.png" width="150" alt="her: a wink and a grin, asking to be praised"></td>
+    <td align="center"><img src="docs/assets/state-her-failed.png" width="150" alt="her: downcast, she messed up"></td>
+  </tr>
+  <tr>
     <td align="center"><sub>You hear</sub></td>
     <td align="center"><sub>Nothing. Keep watching.</sub></td>
     <td align="center"><sub>A chime, then gentle reminders at 2 and 5 minutes and every 10 after</sub></td>
@@ -65,7 +72,7 @@ AgentsMonitor answers it from the corner of your eye. A small round display besi
   </tr>
 </table>
 
-<sub>Real frames from the display code, rendered with made-up sessions. Two themes, one set of news: pick the one you like, or <a href="devices/themes/README.md">make your own</a>.</sub>
+<sub>Real frames from the display code, rendered with made-up sessions. Three themes, one set of news: pick the one you like, or <a href="devices/themes/README.md">make your own</a>. <code>her</code> speaks Chinese for now, and is <a href="devices/themes/her/README.md">translated here</a>.</sub>
 
 ## 📟 The desk display
 
@@ -74,13 +81,21 @@ AgentsMonitor answers it from the corner of your eye. A small round display besi
 - **One glance, every agent.** The screen takes the mood of all your sessions together: the one that needs you most always wins.
 - **It says what it wants.** An approval shows the command it wants to run, and a question shows the question, before you even reach for the keyboard.
 - **Swipe and tap.** Swipe through sessions, swipe up for the list, tap one for its tokens and context. The side button jumps to whoever needs you most; press it twice for everyone.
-- **Pick a look.** The glowing `halo`, the pixel `pets` (rumour says there's a dragon 🐉), or a theme of your own, started from a template in five minutes.
+- **Pick a look.** The glowing `halo`, the pixel `pets` (rumour says there's a dragon 🐉), [`her`](devices/themes/her/README.md), a girlfriend who will notice you left her on read, or a theme of your own, started from a template in five minutes.
 - **Any screen will do.** The firmware targets the [Waveshare ESP32-S3-Touch-AMOLED-1.75C](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) only because it is the board on the author's desk. Port it to another ESP32 and screen, or turn a Raspberry Pi, an e-ink panel or an old phone into a display: all a display needs is one small JSON document.
 - **No board yet?** [Try it in your browser](devices/README.md#-try-it-in-your-browser): the same code, pixel for pixel.
 
 <br clear="right">
 
 ## 🚀 Quick start
+
+> [!TIP]
+> **Your agent can do all of this.** Paste this into Claude Code or Codex, and go make a coffee:
+>
+> ```text
+> Clone https://github.com/1vxx/AgentsMonitor, read its AGENTS.md,
+> and follow the README's quick start for me.
+> ```
 
 **You need** macOS or Linux, [Rust](https://rustup.rs) 1.95+, and Claude Code and/or Codex.
 
@@ -112,6 +127,17 @@ THEME=halo devices/boards/waveshare_amoled_175c/build.sh --upload    # or THEME=
 
 > [!TIP]
 > Want to look around first? `python3 scripts/demo.py` runs everything on [made-up sessions](docs/USAGE.md#demo-mode), no agents needed. If you get `agentsmon: command not found`, `~/.cargo/bin` is not on your `PATH` yet: [here's the fix](docs/USAGE.md#agentsmon-is-not-found-after-cargo-install).
+
+## 🤖 Your agent can do the rest
+
+You already have an engineer who never sleeps, and this repository is written for them too: [AGENTS.md](AGENTS.md) tells them how it works, and [the recipes](docs/RECIPES.md) are prompts you can paste. Yes, you can have your agents install the thing that watches your agents. They don't seem to mind.
+
+| Tell your agent | And you get |
+| --- | --- |
+| *"Flash this onto my board and tell me if it connected."* | A display on your desk, with the serial log already read |
+| *"Make a theme where every session is a fish, and a waiting one taps on the glass."* | A new theme, looked at and checked, ready on the review page |
+| *"Give Her this face."* | 25 expressions from one photo, done by the time you're back from lunch |
+| *"The display says connecting. Find out why."* | An answer, from someone who actually read the logs |
 
 ## 📊 For the numbers, a dashboard
 
@@ -155,6 +181,8 @@ Each agent reports what it does through a plugin, and the daemon reads the agent
 
 ## 🤔 FAQ
 
+**Can my agent set this up for me?** Yes, and that's the easiest way. Everything here is written down for it: start with the [recipes](docs/RECIPES.md). Only your Wi-Fi password and the USB cable stay your job.
+
 **Do I need the hardware?** No. The [browser preview](devices/README.md#-try-it-in-your-browser), the dashboard and `agentsmon status` all work without it. But a screen you never have to switch to is the whole point, and the reference board takes about fifteen minutes to set up.
 
 **Will it slow my agents down?** No. Hooks queue an event and return at once; one round trip to the daemon takes about 70 µs.
@@ -163,14 +191,18 @@ Each agent reports what it does through a plugin, and the daemon reads the agent
 
 **Which agents does it support?** Claude Code (terminal and Desktop) and Codex today. Others need only an adapter: [help wanted](docs/ARCHITECTURE.md#adding-an-agent).
 
-**Can I make it look like something else?** Yes, that's what themes are for. See the [theme guide](devices/themes/README.md).
+**Can I make it look like something else?** Yes, that's what themes are for. See the [theme guide](devices/themes/README.md), or describe what you want to your agent.
+
+**Is `her` OK at the office?** She's a face on a small screen, sulking about unanswered approvals. Your coworkers will have questions, but they'll be fun ones. Her face is [yours to change](devices/themes/her/README.md#-give-her-a-new-face), too.
 
 ## 📚 Documentation
 
 | Guide | What's inside |
 | --- | --- |
+| 🤖 [Recipes](docs/RECIPES.md) | Prompts to paste into your agent: install it, flash it, design a theme, fix what broke |
 | 📟 [Devices](devices/README.md) | Try the display in your browser, flash the reference board, port it to your own hardware |
 | 🎨 [Themes](devices/themes/README.md) | Make a new look for the display: the interface, the toolbox, the checks |
+| 💌 [Her](devices/themes/her/README.md) | Meet her, and give her any face from one photo |
 | 🧭 [Usage guide](docs/USAGE.md) | CLI, configuration, demo mode, the dashboard, token counting, retention, privacy, troubleshooting |
 | 🏗️ [Architecture](docs/ARCHITECTURE.md) | How the daemon works inside, and how to add another agent |
 | 🔌 [Protocol and API](docs/PROTOCOL.md) | Events, REST routes and WebSocket messages, for building your own display |
@@ -187,14 +219,16 @@ Each agent reports what it does through a plugin, and the daemon reads the agent
 | `web/` | The web dashboard (React, Vite), started only when you want it |
 | `scripts/` | `demo.py`, the daemon on made-up sessions |
 | `docs/` | Guides and reference |
+| `AGENTS.md` | How this repository works, written for your coding agent |
 
 ## 🗺️ Roadmap
 
 - [x] Daemon, protocol, storage, REST and WebSocket API
 - [x] Claude Code and Codex: status, tools, subagents, approvals and questions, compaction, context, rate limits
 - [x] Exact token accounting from the agents' own logs
-- [x] Desk display: the reference board, the browser preview, and themes on a shared host (halo, pets, and a starter)
+- [x] Desk display: the reference board, the browser preview, and themes on a shared host (halo, pets, her, and a starter)
 - [x] Web dashboard and bounded retention
+- [x] Docs your agent can follow: [AGENTS.md](AGENTS.md) and [recipes](docs/RECIPES.md)
 - [ ] More themes ([make one](devices/themes/README.md))
 - [ ] More boards and screen sizes ([help wanted](CONTRIBUTING.md))
 - [ ] More agents ([help wanted](docs/ARCHITECTURE.md#adding-an-agent))

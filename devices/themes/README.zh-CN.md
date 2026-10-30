@@ -8,6 +8,7 @@
   <tr>
     <td align="center"><img src="../../docs/assets/halo-home.png" width="170" alt="halo"><br><b><code>halo</code></b><br><sub>一颗光球，颜色代表所有会话的总体状态</sub></td>
     <td align="center"><img src="../../docs/assets/pets.png" width="170" alt="pets"><br><b><code>pets</code></b><br><sub>每个会话一只像素小动物，用动作表演状态</sub></td>
+    <td align="center"><img src="../../docs/assets/state-her-done.png" width="170" alt="her"><br><b><a href="her/README.zh-CN.md"><code>her</code></a></b><br><sub>你已读不回，她绝对会发现的女朋友</sub></td>
     <td align="center"><img src="../../docs/assets/theme-starter.png" width="170" alt="starter"><br><b><code>_template</code></b><br><sub>起步模板，每个新主题都从它复制而来</sub></td>
   </tr>
 </table>
@@ -25,6 +26,12 @@ python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 ```bash
 THEME=aurora devices/boards/waveshare_amoled_175c/build.sh --upload
 ```
+
+## 🤖 或者说给你的 Agent 听
+
+主题很适合交给 Agent，因为它看得见自己做出来的东西：`snap.mjs png` 能给它任意时刻的画面，`snap.mjs check` 告诉它画得对不对。这样你只需要当美术总监。
+
+把你的点子和[主题菜谱](../../docs/RECIPES.zh-CN.md#想一个新主题)一起贴给它，然后用大白话说哪里不对：“光球太亮了”“等待的感觉要更急一点”。`her` 的 25 个表情就是这样调出来的。
 
 ## 🧩 主题在哪一层
 
@@ -77,6 +84,7 @@ host 提供给主题的：
 | `theme::ack()` | 表示用户已经看过在等的事，提醒停止 |
 | `theme::seen(key, endedAt)` | 表示用户在屏幕上看过某个会话刚结束的那一轮；开发板会告诉 daemon，让它在所有地方都不再算新的 |
 | `theme::reminders(out, max)` | 这一帧到期的提醒，在 `frame()` 里主题想做出反应的地方取 |
+| `theme::data()` | 放不进固件的大数据，比如 [Her 的照片](her/README.zh-CN.md)：开发板从闪存里分段读取，预览页直接下载 |
 
 ## 🧰 `core/` 里的工具箱
 
@@ -89,8 +97,9 @@ host 提供给主题的：
 | `spring.h` | 所有动画共用的阻尼弹簧 |
 | `gesture.h` | 一根手指：轻点、拖动和速度，所有主题共用同样的阈值 |
 | `synth.h` | 提示音 |
+| `jpeg.h` | 解码照片，开发板上由芯片完成，预览页上由浏览器完成 |
 
-`halo` 示范了用 `gfx` 做平滑的矢量绘图；`pets` 示范了自己的像素点阵（`board.cpp`）和像素画（`sprites.h`）；起步模板是最小的完整主题。
+`halo` 示范了用 `gfx` 做平滑的矢量绘图；`pets` 示范了自己的像素点阵（`board.cpp`）和像素画（`sprites.h`）；`her` 示范了播放数据包里的照片，文字也烘在包里；起步模板是最小的完整主题。
 
 ## ✅ 好主题的标准
 
@@ -98,8 +107,8 @@ host 提供给主题的：
 - **不写平台代码**：不引用 Arduino 或 ESP-IDF 的头文件，同一份文件要能为浏览器和每块开发板编译。
 - **每种状态都要显示**：等待授权或回答、思考、运行工具、压缩上下文、完成、出错、空闲、无信号、没有会话、连接中和断线。预览页的演示剧本会把它们都走一遍。
 - **按行带绘制结果一致**：`draw()` 只读取 `frame()` 留下的东西，所以在两个核心上按 16 行一带绘制，和整帧绘制的像素完全相同。`snap.mjs check` 可以验证。
-- **足够快**：在参考开发板上至少 30 fps；halo 和 pets 都接近 60 fps。开发板的串口日志每秒打印帧率和每帧耗时。大的数据表放 PSRAM（`gfx::bigAlloc`），内部 RAM 留给 Wi-Fi。
-- **爱护 AMOLED**：以黑色为主，不要让亮的东西几个小时停在同一个位置。两个现有主题每隔几分钟都会把画面挪几个像素。
+- **足够快**：在参考开发板上至少 30 fps；halo 和 pets 都接近 60 fps，`her` 要解码照片，约 36 fps。开发板的串口日志每秒打印帧率和每帧耗时。大的数据表放 PSRAM（`gfx::bigAlloc`），内部 RAM 留给 Wi-Fi。
+- **爱护 AMOLED**：以黑色为主，不要让亮的东西几个小时停在同一个位置。`halo` 和 `pets` 每隔几分钟会把画面挪几个像素，`her` 则一直在动。
 - **暂时只有一种屏幕形状**：主题绘制的是 466 × 466 的圆形画面（`gfx::W`、`gfx::H`）。见[其他屏幕尺寸](../README.zh-CN.md#路线-b换一种屏幕尺寸或形状)。
 
 ## 🧪 测试

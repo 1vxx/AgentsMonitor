@@ -5,10 +5,11 @@ A small screen for your desk that shows what your coding agents are doing. It li
 English | [简体中文](README.zh-CN.md)
 
 <p align="center">
-  <img src="../docs/assets/halo-home.png" width="180" alt="halo: the mood orb">
-  <img src="../docs/assets/halo-approve.png" width="180" alt="halo: a session asks to run a command">
-  <img src="../docs/assets/pets.png" width="180" alt="pets: one pixel animal per session">
-  <img src="../docs/assets/halo-session.png" width="180" alt="halo: one session's tokens and context">
+  <img src="../docs/assets/halo-home.png" width="150" alt="halo: the mood orb">
+  <img src="../docs/assets/halo-approve.png" width="150" alt="halo: a session asks to run a command">
+  <img src="../docs/assets/pets.png" width="150" alt="pets: one pixel animal per session">
+  <img src="../docs/assets/state-her-done.png" width="150" alt="her: a wink and a grin, asking to be praised">
+  <img src="../docs/assets/halo-session.png" width="150" alt="halo: one session's tokens and context">
 </p>
 
 > [!NOTE]
@@ -25,6 +26,10 @@ English | [简体中文](README.zh-CN.md)
 | Another ESP32 and a screen | [Port it to your board](#path-a-another-esp32-board) | 🛠️ an afternoon |
 | A Raspberry Pi, e-ink panel, M5Stack, old phone… | [Read the API](#path-c-anything-that-speaks-http) | 🐍 about 20 lines of code |
 | An idea for a new look | [Make a theme](themes/README.md) | 🎨 start in five minutes |
+| A face in mind | [Give Her a new one](themes/her/README.md#-give-her-a-new-face) | 📸 about 20 minutes |
+
+> [!TIP]
+> **Every row here is a job for your agent.** Claude Code or Codex can install the tools, flash the board, read the logs and write the drivers. Paste a [recipe](../docs/RECIPES.md) and go do something else.
 
 ## 🎮 Try it in your browser
 
@@ -49,6 +54,7 @@ A **theme** decides what is drawn and how it moves. Each firmware image holds on
 | --- | --- | --- |
 | <img src="../docs/assets/halo-home.png" width="96" alt=""> | **`halo`** (default) | A glowing orb whose colour is the overall mood, with each session as a satellite on the ring around it. A session that starts waiting for you takes over the screen with what it wants to run. Swipe up for the list, then tap a row for its tokens and context. |
 | <img src="../docs/assets/pets-approve.png" width="96" alt=""> | **`pets`** | Each session is a pixel animal on an LED dot board, acting out its state: it nods while thinking, jitters and throws sparks while running a tool, hops with a `!` when it needs you, and naps when idle. Swipe up to see the whole crew. Rumour has it there is a dragon 🐉 |
+| <img src="../docs/assets/state-her-done.png" width="96" alt=""> | **[`her`](themes/her/README.md)** | Your agents as a girlfriend, photo-real, with 25 expressions a program works out from a single picture. She types while they think, winks when they finish, and as you ignore her climbs from *"babe, are you there?"* to *"it's fine. I'm fine."* Give her any face you like. |
 
 Want a look of your own? The [theme guide](themes/README.md) takes you from a copied template to your own theme on the board, with the interface, the toolbox and the checks.
 
@@ -62,6 +68,8 @@ Want a look of your own? The [theme guide](themes/README.md) takes you from a co
 | Side button (top), once | Jump to the session that needs you most |
 | Side button, twice | Every session at once |
 | Bottom button, hold 3 s | Summon whatever the theme keeps for rare moments |
+
+`her` keeps taps for herself: see [Talking back](themes/her/README.md#-talking-back).
 
 **Sounds.** A chime when a session starts waiting for you, a soft one when a turn finishes, a low one when a turn fails. If nobody answers a wait, the display reminds you again at 2 and 5 minutes, then every 10 minutes, until you tap it.
 
@@ -121,6 +129,8 @@ THEME=pets PORT=/dev/cu.usbmodem1101 ./build.sh --upload  # or any other theme
 
 Without `--upload` it only compiles. The board plays a soft chime when it starts, joins Wi-Fi and shows your sessions within a few seconds. 🎉
 
+`her` needs one more step, for her photos: `./build.sh --pack demo`. It takes about 3 minutes, and only has to be done again when the pack changes.
+
 ### Troubleshooting
 
 | Symptom | What to check |
@@ -131,6 +141,9 @@ Without `--upload` it only compiles. The board plays a soft chime when it starts
 | `401` in the serial log | The token in `secrets.h` doesn't match `http.token` |
 | Want to see the logs | `arduino-cli monitor -p <port> -c baudrate=115200` prints the link state, frame rate and free memory every second |
 | The upload can't find the board | Hold BOOT while plugging in the cable, then upload again |
+| `her` shows only a silhouette | Her photos aren't on the board yet: `./build.sh --pack demo` |
+
+Still stuck? Your agent can read that log for you: paste the [connection recipe](../docs/RECIPES.md#the-display-wont-connect).
 
 ## 🧰 Make it yours
 
@@ -138,7 +151,7 @@ Without `--upload` it only compiles. The board plays a soft chime when it starts
 
 ```
 devices/
-├── themes/    🎨 what to draw and how it moves: halo, pets, and the _template
+├── themes/    🎨 what to draw and how it moves: halo, pets, her, and the _template
 │                 new themes start from; each implements core/theme.h
 ├── core/      🧮 portable C++17, no platform underneath:
 │                 host.cpp   the display as boards see it (ui.h), run by the theme
@@ -148,12 +161,15 @@ devices/
 │   └── waveshare_amoled_175c/       ← the only hardware-specific code
 ├── sim/       🎮 the review page (the same code in WebAssembly) and snap.mjs
 ├── fonts/     🔤 the bitmap font for Chinese titles (Latin text is built in)
-└── tools/     🧪 new_theme.sh, and build helpers shared by boards
+└── tools/     🧪 new_theme.sh, face_pack.py, and build helpers shared by boards
 ```
 
 Themes and boards mix freely: any theme runs on any board whose screen it fits. You only ever touch the layer you are changing.
 
 ### Path A: another ESP32 board
+
+> [!TIP]
+> This is the most satisfying job to hand an agent: give it the board's documentation and the [porting recipe](../docs/RECIPES.md#bring-it-to-another-board), and review what comes back.
 
 Copy `boards/waveshare_amoled_175c/` to `boards/<your_board>/`, rename the `.ino` to match the folder, and replace the drivers. The sketch only has to do this:
 
@@ -166,6 +182,7 @@ Copy `boards/waveshare_amoled_175c/` to `boards/<your_board>/`, rename the `.ino
 | Buttons | `ui::press(ms)` for the side button, `ui::summon(ms)` for a long hold | optional |
 | Sound | Play each `ui::cue()` with `core/synth` through your speaker | optional |
 | Seen | Send each `ui::seen(key, len, &endedAt)` to the daemon as `POST /v1/sessions/<key>/seen` with `{"ended_at": endedAt}`, so a turn tapped here stops being new everywhere | optional |
+| Theme data | For a theme with more data than fits in the firmware, like `her`'s photos: pass its length and a read function to `ui::init`, and set `jpeg::decode` (see `data.cpp`) | optional |
 
 `net.cpp` (polling over Wi-Fi) and the frame loop in the `.ino` usually carry over unchanged. **What the core needs:** an ESP32-S3-class chip with PSRAM, where the core keeps over 1 MB of buffers. A second core is optional: drawing splits across both when there are two (`gfx::split`), and runs one half after the other when there is one.
 
@@ -227,7 +244,7 @@ while True:
     time.sleep(1)
 ```
 
-Polling once a second is plenty. For instant updates, open the WebSocket at `/v1/ws` (with `?token=`) and watch for `summary` messages. Every field is described in [Protocol and API](../docs/PROTOCOL.md).
+Polling once a second is plenty. For instant updates, open the WebSocket at `/v1/ws` (with `?token=`) and watch for `summary` messages. Every field is described in [Protocol and API](../docs/PROTOCOL.md). Or skip the typing: this is [a recipe](../docs/RECIPES.md#make-a-display-out-of-anything) too.
 
 ### Make a theme
 

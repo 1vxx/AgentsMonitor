@@ -11,9 +11,16 @@ Thanks for helping make AgentsMonitor better! Bug reports, new themes, boards, a
 | 🐛 Report a bug | [Open a bug report](https://github.com/1vxx/AgentsMonitor/issues/new?template=bug_report.yml). The output of `agentsmon status` and `AGENTSMON_LOG=debug agentsmon serve` helps a lot |
 | 🔌 Support another board or screen | [Make it yours](devices/README.md#-make-it-yours) in the devices guide |
 | 🎨 Make a theme for the display | The [theme guide](devices/themes/README.md) |
+| 🤖 Share a prompt that worked | Add a [recipe](docs/RECIPES.md) |
 | 🤖 Support another coding agent | [Adding an agent](docs/ARCHITECTURE.md#adding-an-agent) |
 | 🐾 Show off your build | [Share it](https://github.com/1vxx/AgentsMonitor/issues/new?template=show_your_build.yml) |
 | 💡 Suggest something bigger | [Open a feature request](https://github.com/1vxx/AgentsMonitor/issues/new?template=feature_request.yml) first, so we can agree on the shape before you write code |
+
+## 🤖 Working with an agent
+
+Most changes here start with one, and that's welcome. Yours can read [AGENTS.md](AGENTS.md) for how the repository works, and the [recipes](docs/RECIPES.md) for the usual jobs. A theme, a board or an adapter is a fine first prompt.
+
+Two things stay yours. **Read the diff:** you're the one sending it. **Run the checks,** or have your agent run them and show you the output: "the agent says it works" isn't a check. Pull requests are judged on what's in them, not on who typed them.
 
 ## Set up
 
@@ -45,7 +52,7 @@ Then:
 - **Match the surrounding code.** Follow its naming, comment style and idioms rather than introducing new ones.
 - **Write commit messages as a short sentence** in the imperative, describing the effect: `Keep pets in their places when swiping`, not `fix: pets bug`.
 - **Update the docs** when behaviour or setup changes. User-facing guides come in English and Chinese, so update both if you can (or say so in the pull request, and someone will help).
-- **Never commit secrets or private data.** `secrets.h` and `web/.env.local` are ignored by git; keep it that way. Screenshots should show made-up sessions, not your real projects.
+- **Never commit secrets or private data.** `secrets.h` and `web/.env.local` are ignored by git; keep it that way. Screenshots should show made-up sessions, not your real projects. Photo packs of real people stay in `devices/sim/build/`, which git ignores too.
 
 ## Adding a board
 
