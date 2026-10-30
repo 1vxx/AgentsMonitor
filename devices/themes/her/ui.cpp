@@ -70,7 +70,7 @@ constexpr int64_t ABORT_MS = 15000;      // cut off mid-sentence, she says so th
 constexpr int64_t HELLO_MS = 4000;       // "在吗?" before what she wants
 constexpr int64_t BORED_MS = 3 * MIN, NAP_MS = 10 * MIN;
 constexpr int64_t FLASH_MS = 1500;       // a capsule's glow when there is news from it
-constexpr int64_t SAY_MS = 2600;         // a reaction's words
+constexpr int64_t SAY_MS = 3400;         // a reaction's words
 constexpr int SWIPE_PX = 60;            // a sideways drag this long moves to the next session
 constexpr float SLIDE_PX = 300;         // how far apart neighbouring sessions' words sit
 
@@ -300,6 +300,9 @@ void settle(const char *pose) {
 
 // A one-off clip, then back to the face she was in, or to `then`
 void reaction(const char *clip, const char *then = nullptr) {
+  // One at a time: taps while she is at it get her words, not a line of faces
+  for (int i = 0; i < queued; i++)
+    if (!queue[i].loop && !strchr(pack.clip[queue[i].clip].name, '.')) return;
   char back[16];
   snprintf(back, sizeof back, "%s", then ? then : resting);
   leave();

@@ -2,7 +2,7 @@
 expression table (devices/themes/<theme>/faces.py), rendered by LivePortrait
 frame by frame from its parameters, in one file the display plays.
 
-    python3 devices/tools/face_pack.py <photo> [--name xiaomei] [--theme her] [-o pack]
+    python3 devices/tools/face_pack.py <photo> [--name xiaomei] [--theme her] [--demo] [-o pack]
 
 LivePortrait is found at $LIVEPORTRAIT, else ~/.cache/agentsmon/liveportrait,
 and this runs again with the Python installed there, which has its packages.
@@ -12,7 +12,14 @@ for the review page to pick from; build.sh --pack <name> writes one to a
 board. Frames are kept under devices/sim/build/<theme>-frames/, a folder per
 photo, so a face renders once: run again, or for a face made before, only the
 clips whose parameters changed render, and the rest is packing, in seconds.
-Nothing it writes is meant for the repo.
+None of that is meant for the repo. --demo is: it makes the pack the theme
+comes with, in devices/themes/<theme>/demo/, listed there the same way, for
+someone with no pack of their own.
+
+Text is baked in from the fonts faces.py's TEXT names, found among the
+system's or in ~/.cache/agentsmon/fonts. Her's is Noto Sans SC, from
+github.com/google/fonts (ofl/notosanssc); a pack goes out with a font's glyphs
+in it, so a demo needs one that allows that.
 
 The pack, little-endian:
     "FPK2", u32 total length, u16 width, u16 height, u16 fps, u16 clip count,
@@ -47,11 +54,16 @@ from pathlib import Path
 DEVICES = Path(__file__).resolve().parent.parent
 SIZE = 466
 QUALITY = 80
+# A pack has to fit a board's data partition (see build.sh): it is packed at
+# the best quality that does, up to this one, as some photos weigh more
+PACK_QUALITY = QUALITY + 5
+ROOM = 0x16E0000
 
 ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 ap.add_argument("photo")
 ap.add_argument("--theme", default="her")
 ap.add_argument("--name", help="whose face this is, the pack's name; the photo's file name if not given")
+ap.add_argument("--demo", action="store_true", help="make the theme's demo pack, beside the theme")
 ap.add_argument("-o", "--out", help="a pack file to write instead of a named one")
 ap.add_argument("--liveportrait", default=os.environ.get("LIVEPORTRAIT", str(Path.home() / ".cache/agentsmon/liveportrait")))
 args = ap.parse_args()
@@ -73,7 +85,7 @@ BUILD = DEVICES / "sim" / "build"
 who = args.name or photo.stem
 if any(c in who for c in '/\\:') or who.startswith("."):
     sys.exit(f"{who!r} won't do as a name: no slashes, colons or leading dot")
-packs = BUILD / f"{args.theme}-packs"
+packs = DEVICES / "themes" / args.theme / "demo" if args.demo else BUILD / f"{args.theme}-packs"
 out = Path(args.out).resolve() if args.out else packs / f"{who}.pack"
 
 # ---------- The clips, as parameters per frame ----------
@@ -111,24 +123,27 @@ def fall(pose, length):
     return list(reversed(rise(pose, length)))
 
 
+def living(pose, motion, t, length):
+    """A moment at the peak, breathing, blinking once unless the eyes are shut"""
+    p = plus(pose, motion(t) if motion else {})
+    p = plus(p, dict(pitch=0.6 * F.wave(t, length), yaw=0.8 * F.wave(t, length, 0.3)))
+    # A wink is all the blink a moment needs
+    if pose.get("shut", 0) < 0.8 and "wink" not in p:
+        # A blink closes the eyes from wherever they are, wide open included
+        b, s = F.blink(t, length * 0.7), p.get("shut", 0)
+        p["shut"] = s + (1 - s) * b if s < 0 else max(s, b)
+    return p
+
+
 def alive(pose, motion, length):
-    """At the peak, breathing, blinking once unless the eyes are shut"""
-    seq = []
-    for t in frames(length):
-        p = plus(pose, motion(t) if motion else {})
-        p = plus(p, dict(pitch=0.6 * F.wave(t, length), yaw=0.8 * F.wave(t, length, 0.3)))
-        if pose.get("shut", 0) < 0.8:
-            # A blink closes the eyes from wherever they are, wide open included
-            b, s = F.blink(t, length * 0.7), p.get("shut", 0)
-            p["shut"] = s + (1 - s) * b if s < 0 else max(s, b)
-        seq.append(p)
-    return seq
+    return [living(pose, motion, t, length) for t in frames(length)]
 
 
-def once(pose, length):
+def once(pose, motion, length):
+    """From rest up to its peak, alive there, and back"""
     n = len(frames(length))
-    up, down = round(n * 0.22), round(n * 0.3)
-    return [toward(pose, ease(min(1, (i + 1) / (up + 1), (n - i) / (down + 1)))) for i in range(n)]
+    up, down = round(n * 0.18), round(n * 0.25)
+    return [toward(living(pose, motion, t, length), ease(min(1, (i + 1) / (up + 1), (n - i) / (down + 1)))) for i, t in enumerate(frames(length))]
 
 
 CLIPS = [("idle", [F.idle(t) for t in frames(F.IDLE_S)])]
@@ -139,7 +154,7 @@ for name, pose in F.STATES.items():
         (name + ".out", fall(pose, F.OUT_S)),
     ]
 for name, pose in F.REACTIONS.items():
-    CLIPS.append((name, once(pose, F.REACT_S)))
+    CLIPS.append((name, once(pose, F.REACT_MOTION.get(name), F.REACT_S)))
 for name, seq in CLIPS:
     if len(name) > 15:
         sys.exit(f"clip name too long for the pack: {name}")
@@ -161,7 +176,7 @@ from src.gradio_pipeline import GradioPipeline  # noqa: E402
 from src.utils.camera import get_rotation_matrix  # noqa: E402
 from src.utils.crop import paste_back, prepare_paste_back  # noqa: E402
 from src.utils.io import load_img_online  # noqa: E402
-from src.utils.retargeting_utils import calc_eye_close_ratio, calc_lip_close_ratio  # noqa: E402
+from src.utils.retargeting_utils import calc_eye_close_ratio  # noqa: E402
 
 
 def fields(cls, d):
@@ -183,7 +198,6 @@ with torch.no_grad():
     feat = lp.extract_feature_3d(src)
     x_s = lp.transform_keypoint(info)
     eye0 = float(calc_eye_close_ratio(lmk[None]).mean())
-    lips0 = float(calc_lip_close_ratio(lmk[None])[0][0])
     M = crop["M_c2o"]
     mask = prepare_paste_back(lp.inference_cfg.mask_crop, M, dsize=(img.shape[1], img.shape[0]))
     # The display gets a square round her face, cut from the whole photo
@@ -192,6 +206,10 @@ with torch.no_grad():
     sx = int(min(max(cx - side / 2, 0), img.shape[1] - side))
     sy = int(min(max(cy - side / 2, 0), img.shape[0] - side))
 
+# What "mouth" counts from, in LivePortrait's measure of how far the lips are
+# apart. A fixed amount and not the photo's: lips shut in the photo measure 0,
+# and no multiple of that would ever open them.
+LIPS = 0.13
 EDITS = (
     ("smile", pipe.update_delta_new_smile),
     ("lip0", pipe.update_delta_new_lip_variation_zero),
@@ -216,7 +234,7 @@ def render(p):
         target = min(max(eye0 * (1 - p["shut"]), 0), 0.8)
         x_d = x_d + lp.retarget_eye(x_s, lp.calc_combined_eye_ratio([[target]], lmk))
     if abs(p.get("mouth", 0)) > 0.01:
-        target = min(max(lips0 * (1 - p["mouth"]), 0), 0.8)
+        target = min(max(LIPS * (1 - p["mouth"]), 0), 0.8)
         x_d = x_d + lp.retarget_lip(x_s, lp.calc_combined_lip_ratio([[target]], lmk))
     x_d = lp.stitching(x_s, x_d)
     face = lp.parse_output(lp.warp_decode(feat, x_s, x_d)["out"])[0]
@@ -262,11 +280,11 @@ if hasattr(F, "LOOK"):
     keep = keep[..., None]
 
 
-def packed(path):
+def packed(path, quality):
     if keep is None:
         return path.read_bytes()
     im = cv2.imread(str(path)).astype(np.float32) * keep
-    return cv2.imencode(".jpg", np.clip(im + 0.5, 0, 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, QUALITY + 5])[1].tobytes()
+    return cv2.imencode(".jpg", np.clip(im + 0.5, 0, 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, quality])[1].tobytes()
 
 
 # ---------- Text ----------
@@ -296,10 +314,18 @@ def gb2312():
     return chars
 
 
+def variations(font):
+    try:
+        return font.get_variation_names()
+    except OSError:
+        return []
+
+
 def find_face(family, style, size):
     from PIL import ImageFont
 
-    dirs = [Path("/System/Library/Fonts"), Path("/Library/Fonts"), Path.home() / "Library/Fonts"]
+    fonts = Path.home() / ".cache/agentsmon/fonts"
+    dirs = [fonts, Path("/System/Library/Fonts"), Path("/Library/Fonts"), Path.home() / "Library/Fonts"]
     dirs += sorted(Path("/System/Library/AssetsV2").glob("com_apple_MobileAsset_Font*/*/AssetData"))
     for d in dirs:
         for f in sorted(d.glob("*.tt[cf]")) + sorted(d.glob("*.otf")):
@@ -310,7 +336,11 @@ def find_face(family, style, size):
                     break
                 if font.getname() == (family, style):
                     return font
-    sys.exit(f"no font {family} {style} on this computer; name another in faces.py's TEXT")
+                # A variable font has its weights inside it, under names
+                if font.getname()[0] == family and style.encode() in variations(font):
+                    font.set_variation_by_name(style)
+                    return font
+    sys.exit(f"no font {family} {style} on this computer; put it in {fonts}, or name another in faces.py's TEXT")
 
 
 def bake(font, chars, shadow):
@@ -358,23 +388,34 @@ def text_section():
     return sect
 
 
-clips, jpegs = [], []
-for name, seq in CLIPS:
-    clips.append((name, len(jpegs), len(seq)))
-    jpegs += [packed(work / name / f"{i:03d}.jpg") for i in range(len(seq))]
 text = text_section()
+for quality in range(PACK_QUALITY, 59, -1):
+    # A frame with the same parameters as one before it is that frame (a
+    # state's way out is its way in, backwards), kept once
+    clips, order, jpegs, seen = [], [], [], {}
+    for name, seq in CLIPS:
+        clips.append((name, len(order), len(seq)))
+        for i, p in enumerate(seq):
+            key = json.dumps(sorted(p.items()))
+            if key not in seen:
+                seen[key] = len(jpegs)
+                jpegs.append(packed(work / name / f"{i:03d}.jpg", quality))
+            order.append(seen[key])
+    # With the header, the index and padding
+    if sum(map(len, jpegs)) + len(text) + 8 * len(order) + 4 * len(jpegs) + 4096 <= ROOM:
+        break
 head = struct.pack("<4sIHHHHII", b"FPK2", 0, SIZE, SIZE, F.FPS, len(clips), 0, len(text))
 head += b"".join(struct.pack("<16sHH", n.encode(), first, count) for n, first, count in clips)
-head += struct.pack("<I", len(jpegs))
-at = len(head) + 8 * len(jpegs)
-index, body = bytearray(), bytearray()
+head += struct.pack("<I", len(order))
+at = len(head) + 8 * len(order)
+places, body = [], bytearray()
 for j in jpegs:
     pad = (-at) % 4
     body += b"\0" * pad + j
     at += pad
-    index += struct.pack("<II", at, len(j))
+    places.append(struct.pack("<II", at, len(j)))
     at += len(j)
-data = bytearray(head) + index + body
+data = bytearray(head) + b"".join(places[k] for k in order) + body
 data += b"\0" * ((-len(data)) % 4)
 if text:
     struct.pack_into("<I", data, 16, len(data))
@@ -383,7 +424,7 @@ struct.pack_into("<I", data, 4, len(data))
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_bytes(data)
 os.chdir(here)
-print(f"{out}: {len(clips)} clips, {len(jpegs)} frames, {len(data) / 1e6:.1f} MB, in {time.time() - t0:.0f}s")
+print(f"{out}: {len(clips)} clips, {len(order)} frames, {len(jpegs)} different, at quality {quality}, {len(data) / 1e6:.1f} MB, in {time.time() - t0:.0f}s")
 
 # What each named pack is, beside it, and every pack there listed in
 # index.json for the review page

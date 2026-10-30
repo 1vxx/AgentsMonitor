@@ -4,8 +4,8 @@
 # into each image. PORT is the board's serial port.
 # --pack <file or name> instead writes a theme's data, such as a photo pack,
 # into the flash's data partition, and nothing else: no build, the firmware
-# stays. A name is a pack devices/tools/face_pack.py made under it, for THEME
-# (her if not given).
+# stays. A name is a pack devices/tools/face_pack.py made under it, or the
+# demo pack of that name, for THEME (her if not given).
 # Needs arduino-cli with the esp32 core and SensorLib, and secrets.h (copy
 # secrets.example.h).
 set -e
@@ -13,10 +13,10 @@ set -e
 PACK=""
 PACKS_OF="${THEME:-her}"
 if [ "$1" = "--pack" ] && [ -n "$2" ]; then
-  NAMED="$(dirname "$0")/../../sim/build/$PACKS_OF-packs/$2.pack"
-  if [ -f "$2" ]; then PACK="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
-  elif [ -f "$NAMED" ]; then PACK="$(cd "$(dirname "$NAMED")" && pwd)/$(basename "$NAMED")"
-  fi
+  TOP="$(dirname "$0")/../.."
+  for f in "$2" "$TOP/sim/build/$PACKS_OF-packs/$2.pack" "$TOP/themes/$PACKS_OF/demo/$2.pack"; do
+    if [ -f "$f" ]; then PACK="$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"; break; fi
+  done
 fi
 cd "$(dirname "$0")"
 DEVICES=../..
@@ -30,7 +30,7 @@ DATA_SIZE=$((0x16E0000))
 if [ "$1" = "--pack" ]; then
   if [ -z "$PACK" ]; then
     echo "usage: build.sh --pack <file or name>; the names there are:" >&2
-    ls "$DEVICES/sim/build/$PACKS_OF-packs" 2>/dev/null | sed -n 's/^\(.*\)\.pack$/  \1/p' >&2
+    ls "$DEVICES/sim/build/$PACKS_OF-packs" "$DEVICES/themes/$PACKS_OF/demo" 2>/dev/null | sed -n 's/^\(.*\)\.pack$/  \1/p' >&2
     exit 1
   fi
   if [ "$(wc -c < "$PACK")" -gt "$DATA_SIZE" ]; then

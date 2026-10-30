@@ -29,10 +29,16 @@ const menu = themeMenu(THEMES, theme, pick, next => {
   url.searchParams.set('theme', next.id)
   location.href = url.href
 })
-// The theme's photo packs (devices/tools/face_pack.py --name), if it has
-// any: the one asked for (?pack=), else the last one shown, else the first;
-// another one reloads the page with it
-const PACKS = await fetch(`build/${theme.id}-packs/index.json`, { cache: 'no-cache' }).then(r => (r.ok ? r.json() : [])).catch(() => [])
+// The theme's photo packs, if it has any: those made here
+// (devices/tools/face_pack.py --name), then the demo it comes with. The one
+// asked for (?pack=), else the last one shown, else the first; another one
+// reloads the page with it
+const packsIn = dir =>
+  fetch(`${dir}/index.json`, { cache: 'no-cache' })
+    .then(r => (r.ok ? r.json() : []))
+    .catch(() => [])
+    .then(list => list.map(x => ({ ...x, url: `${dir}/${encodeURIComponent(x.name)}.pack` })))
+const PACKS = [...(await packsIn(`build/${theme.id}-packs`)), ...(await packsIn(`../themes/${theme.id}/demo`))]
 const askedPack = new URLSearchParams(location.search).get('pack') || saved(`am.pack.${theme.id}`)
 const pack = PACKS.find(x => x.name === askedPack) ?? PACKS[0]
 const packs = pack
@@ -66,7 +72,7 @@ const cjk = new Uint8Array(await fetch('../fonts/cjk10.bin').then(r => r.arrayBu
 // The theme's own data, as a board keeps it in its data partition: the photo
 // pack picked, else build/<theme>.pack if there is one. Checked with the
 // server every time, since a pack made again keeps its name.
-const dataUrl = pack ? `build/${theme.id}-packs/${encodeURIComponent(pack.name)}.pack` : `build/${theme.id}.pack`
+const dataUrl = pack ? pack.url : `build/${theme.id}.pack`
 const data = await fetch(dataUrl, { cache: 'no-cache' }).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null)
 // Both stay in the module's memory for good: the core reads straight from them
 const dataAt = data ? copyIn(new Uint8Array(data)) : 0

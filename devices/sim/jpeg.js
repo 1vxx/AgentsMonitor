@@ -21,7 +21,8 @@ export function jpegDecoder(mod, base, len) {
     const at = (magic === 'FPK2' ? 24 : 16) + 20 * dv.getUint16(14, true)
     for (let i = 0, n = dv.getUint32(at, true); i < n; i++) {
       const p = base + dv.getUint32(at + 4 + 8 * i, true)
-      order.set(p, frames.length)
+      // A frame the pack keeps once can come twice: the first is the one ahead of what follows it
+      if (!order.has(p)) order.set(p, frames.length)
       frames.push([p, dv.getUint32(at + 8 + 8 * i, true)])
     }
   }
