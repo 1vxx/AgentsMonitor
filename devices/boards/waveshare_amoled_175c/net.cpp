@@ -1,6 +1,7 @@
 // GET /v1/summary rather than the WebSocket: the socket opens with a snapshot
 // of every session, far bigger than the summary, and a second's polling is
-// plenty for a display. Three failures in a row count as the link lost.
+// plenty for a display. Three failures in a row count as the link lost. Turns
+// the person saw on the display go back as POSTs, just before the next poll.
 
 #include "net.h"
 
@@ -20,6 +21,47 @@ SemaphoreHandle_t lock;
 char *latest;
 bool fresh;
 
+// Turns seen on the display, waiting to be told
+struct Seen {
+  char key[96];
+  int64_t endedAt;
+};
+Seen seens[4];
+int seenHead, seenTail;
+
+// A session key as one path segment: everything but letters, digits and
+// -._~: escaped
+void pathOf(const char *key, char *out, size_t len) {
+  int n = snprintf(out, len, "http://%s:%d/v1/sessions/", DAEMON_HOST, DAEMON_PORT);
+  for (const char *c = key; *c && n + 4 < int(len); c++) {
+    if (isalnum((unsigned char)*c) || strchr("-._~:", *c))
+      out[n++] = *c;
+    else
+      n += snprintf(out + n, len - n, "%%%02X", (unsigned char)*c);
+  }
+  snprintf(out + n, len - n, "/seen");
+}
+
+void tellSeen(HTTPClient &http, const char *auth) {
+  for (;;) {
+    xSemaphoreTake(lock, portMAX_DELAY);
+    bool any = seenHead != seenTail;
+    Seen s = seens[seenHead];
+    if (any) seenHead = (seenHead + 1) % 4;
+    xSemaphoreGive(lock);
+    if (!any) return;
+    char url[400], body[48];
+    pathOf(s.key, url, sizeof url);
+    snprintf(body, sizeof body, "{\"ended_at\":%lld}", (long long)s.endedAt);
+    if (!http.begin(url)) continue;
+    if (DAEMON_TOKEN[0]) http.addHeader("Authorization", auth);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST(body);
+    if (code != 204) Serial.printf("net: POST %s: %d\n", url, code);
+    http.end();
+  }
+}
+
 void task(void *) {
   char url[160];
   snprintf(url, sizeof url, "http://%s:%d/v1/summary", DAEMON_HOST, DAEMON_PORT);
@@ -37,6 +79,7 @@ void task(void *) {
     }
     http.setTimeout(TIMEOUT_MS);
     http.setReuse(true);
+    tellSeen(http, auth);
     bool ok = false;
     if (http.begin(url)) {
       if (DAEMON_TOKEN[0]) http.addHeader("Authorization", auth);
@@ -88,6 +131,18 @@ bool take(char *out, size_t len) {
   fresh = false;
   xSemaphoreGive(lock);
   return true;
+}
+
+void seen(const char *key, int64_t endedAt) {
+  xSemaphoreTake(lock, portMAX_DELAY);
+  int next = (seenTail + 1) % 4;
+  if (next != seenHead) {
+    strncpy(seens[seenTail].key, key, sizeof seens[seenTail].key - 1);
+    seens[seenTail].key[sizeof seens[seenTail].key - 1] = 0;
+    seens[seenTail].endedAt = endedAt;
+    seenTail = next;
+  }
+  xSemaphoreGive(lock);
 }
 
 }  // namespace net

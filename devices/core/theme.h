@@ -43,6 +43,10 @@ void chime(synth::Cue cue);
 // The person has seen what waits: no more reminders for the waits there are
 // now. The host does this on every press of the side button.
 void ack();
+// The person looked at a session's finished turn on the display, the one that
+// ended at endedAt: the host passes it on to the daemon, so the turn stops
+// counting as new everywhere, not only here
+void seen(const char *key, int64_t endedAt);
 // Reminders for waits nobody has answered, due as of this frame; returns how
 // many, each already chimed. Call it at most once a frame, from frame(), at
 // the point where the theme wants to react to them. A theme that never calls

@@ -49,6 +49,12 @@ const cjk = new Uint8Array(await fetch('../fonts/cjk10.bin').then(r => r.arrayBu
 // The font stays in the module's memory for good: text is drawn straight from it
 if (!mod._am_init(copyIn(cjk), cjk.length)) throw new Error('UI init failed')
 
+const cString = p => {
+  let s = ''
+  for (let i = p; mod.HEAPU8[i]; i++) s += String.fromCharCode(mod.HEAPU8[i])
+  return s
+}
+
 const ui = {
   link: state => mod._am_link(LINK[state]),
   summary: json => {
@@ -62,12 +68,12 @@ const ui = {
   summon: ms => mod._am_summon(ms),
   frame: (ms, wall) => mod._am_frame(ms, wall, 0),
   cue: () => mod._am_cue(),
-  screen: () => {
-    const p = mod._am_screen()
-    let s = ''
-    for (let i = p; mod.HEAPU8[i]; i++) s += String.fromCharCode(mod.HEAPU8[i])
-    return s
+  // The next finished turn looked at on the display, as [key, ended_at], or null
+  seen: () => {
+    const p = mod._am_seen()
+    return p ? [cString(p), mod._am_seen_ended()] : null
   },
+  screen: () => cString(mod._am_screen()),
 }
 
 // The stage glows in the display's mood
@@ -294,6 +300,19 @@ const connectLive = () => {
 }
 let liveSessions = []
 
+// A turn looked at on the display: the made-up world opens its session, and
+// the live daemon hears it as it would from a board
+const tellSeen = (key, endedAt) => {
+  log(t('log.seen', { key }))
+  if (source !== 'live') return world.open(now(), key)
+  const ws = liveUrl()
+  if (!ws) return
+  const url = new URL(ws)
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+  url.pathname = `/v1/sessions/${encodeURIComponent(key)}/seen`
+  fetch(url, { method: 'POST', body: JSON.stringify({ ended_at: endedAt }) }).catch(() => {})
+}
+
 segmented('source', 'script', v => {
   if (v === source) return
   source = v
@@ -468,6 +487,7 @@ const tick = forced => {
     toast(cueName(c), CUE_TONES[c])
     play(c)
   }
+  for (let s; (s = ui.seen()); ) tellSeen(...s)
 
   if (at - statAt > 500) {
     $('r-screen').textContent = ui.screen()

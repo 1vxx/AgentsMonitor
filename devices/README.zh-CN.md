@@ -165,6 +165,7 @@ devices/
 | 触摸 | `ui::touch(DOWN / MOVE / UP, x, y, ms)` | 可选 |
 | 按键 | 侧键用 `ui::press(ms)`，长按用 `ui::summon(ms)` | 可选 |
 | 声音 | 用 `core/synth` 把每个 `ui::cue()` 从扬声器播出来 | 可选 |
+| 已读 | 把每个 `ui::seen(key, len, &endedAt)` 用 `POST /v1/sessions/<key>/seen` 发给 daemon，带上 `{"ended_at": endedAt}`，这样在屏幕上点过的那一轮在所有地方都不再算新的 | 可选 |
 
 `net.cpp`（通过 Wi-Fi 轮询）和 `.ino` 里的帧循环通常可以原样沿用。**核心代码的要求：** ESP32-S3 级别、带 PSRAM 的芯片，核心会在 PSRAM 里放 1 MB 以上的缓冲。第二个核心是可选的：有两个核心时绘制会分摊到两个核心上（`gfx::split`），只有一个时就先画一半再画另一半。
 

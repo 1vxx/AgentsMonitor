@@ -7,6 +7,7 @@ mod client;
 mod codex;
 mod config;
 mod desktop;
+mod front;
 mod hub;
 mod janitor;
 mod otlp;

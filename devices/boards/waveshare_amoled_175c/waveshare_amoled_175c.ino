@@ -147,6 +147,8 @@ void loop() {
   frames++;
 
   for (int c; (c = ui::cue()) >= 0;) audio::play(c);
+  char key[96];
+  for (int64_t endedAt; ui::seen(key, sizeof key, &endedAt);) net::seen(key, endedAt);
 
   uint32_t ms = millis();
   if (ms - statAt >= 1000) {

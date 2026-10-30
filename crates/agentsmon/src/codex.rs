@@ -10,6 +10,7 @@
 //!   a file of its own under its root session's id.
 //! - **Threads.** `$CODEX_HOME/state_<n>.sqlite` has a row per thread, with the
 //!   name Codex shows and whether it is archived; a deleted thread leaves it.
+//!   Its `thread_read_receipts` say which threads the Codex app marks unread.
 //!
 //! Neither format is public: everything here is read-only and best effort,
 //! and what does not read as expected is skipped.
@@ -477,6 +478,48 @@ impl Threads {
         self.seen.retain(|id| ids.contains(id));
         out
     }
+
+    /// Of these threads, each with when its last turn began, those Codex
+    /// counts as read through that turn: no unread mark in its sidebar, and
+    /// the mark already reckoned with the turn, not still with one before.
+    pub fn read(&self, turns: &[(String, i64)]) -> Vec<String> {
+        let ids: Vec<String> = turns.iter().map(|(id, _)| id.clone()).collect();
+        let Some(receipts) = self.database().and_then(|db| read_receipts(&db, &ids).ok()) else { return Vec::new() };
+        turns
+            .iter()
+            .filter(|(id, began)| {
+                receipts.get(id).is_some_and(|(unread, published)| {
+                    !unread && published.as_deref().and_then(uuid7_ms).is_some_and(|at| at >= began - TURN_CLOCKS_MS)
+                })
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+}
+
+/// How far a turn's id (minted by Codex as the turn starts) may be dated
+/// before the start its prompt hook gave it.
+const TURN_CLOCKS_MS: i64 = 3_000;
+
+/// The time in a version 7 UUID, which Codex's turn ids are: its first 48 bits.
+fn uuid7_ms(id: &str) -> Option<i64> {
+    let hex: String = id.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 || hex.as_bytes()[12] != b'7' {
+        return None;
+    }
+    i64::from_str_radix(&hex[..12], 16).ok()
+}
+
+/// Each thread's receipt: whether a turn is unread, and the last turn shown.
+fn read_receipts(db: &Path, ids: &[String]) -> rusqlite::Result<HashMap<String, (bool, Option<String>)>> {
+    let c = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    c.busy_timeout(Duration::from_millis(500))?;
+    let marks = vec!["?"; ids.len()].join(",");
+    let mut stmt = c.prepare(&format!(
+        "SELECT thread_id, first_unread_turn IS NOT NULL, last_published_turn FROM thread_read_receipts WHERE thread_id IN ({marks})"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+    rows.collect()
 }
 
 fn read_threads(db: &Path, ids: &[String]) -> rusqlite::Result<HashMap<String, (Option<String>, bool)>> {
@@ -695,6 +738,31 @@ mod tests {
         db.execute("DELETE FROM threads WHERE id IN ('a', 'new')", []).unwrap();
         assert_eq!(t.follow(&ids(&["a", "b", "new"])).deleted, vec!["a".to_string()]);
         assert_eq!(Threads::at(home.join("nowhere")).follow(&ids(&["a"])), Followed::default());
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn reads_which_threads_codex_counts_as_read() {
+        let home = temp("receipts");
+        // Turn ids are version 7 UUIDs: 0x01a18a4f5008 ms is 2026-10-30T00:56:56.072Z
+        let began = 0x01a1_8a4f_5008;
+        let db = Connection::open(home.join("state_5.sqlite")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE thread_read_receipts (thread_id TEXT PRIMARY KEY NOT NULL, first_unread_turn TEXT, revision TEXT NOT NULL, last_published_turn TEXT);
+             INSERT INTO thread_read_receipts VALUES
+               ('read', NULL, 'r1', '01a18a4f-5008-70b1-a6e3-1d3edea64ea1'),
+               ('unread', '01a18a4f-5008-70b1-a6e3-1d3edea64ea1', 'r2', '01a18a4f-5008-70b1-a6e3-1d3edea64ea1'),
+               ('behind', NULL, 'r3', '01a18a4b-0000-70b1-a6e3-1d3edea64ea1'),
+               ('odd', NULL, 'r4', 'not-a-uuid');",
+        )
+        .unwrap();
+        let t = Threads::at(home.clone());
+        let turns: Vec<(String, i64)> =
+            ["read", "unread", "behind", "odd", "none"].iter().map(|id| (id.to_string(), began + 1_000)).collect();
+        assert_eq!(t.read(&turns), vec!["read".to_string()]);
+        // Before Codex kept receipts: nothing is read
+        db.execute("DROP TABLE thread_read_receipts", []).unwrap();
+        assert!(t.read(&turns).is_empty());
         std::fs::remove_dir_all(&home).ok();
     }
 }

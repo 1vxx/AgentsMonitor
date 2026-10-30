@@ -127,7 +127,7 @@ Each agent's account windows (`five_hour`, `seven_day`, and the weekly windows o
 
 ## Retention and cleanup
 
-The janitor runs on two schedules.
+The janitor runs on three schedules.
 
 **Every 15 s**, over the sessions in memory (what the dashboard shows):
 
@@ -136,6 +136,12 @@ The janitor runs on two schedules.
 - A Codex session follows its row in Codex's thread records (`~/.codex/state_<n>.sqlite`, read-only): archived there, it leaves the live view; gone from there after it was found, it was deleted and is forgotten. Its title is the thread's `name`, the one Codex shows.
 - A session that reappears after leaving memory (unarchived, or resumed days later) is reloaded from the store, so its statistics continue.
 - Each Claude Code session takes its title from its transcript, where Claude Code writes `custom-title` (a `/rename`, or Claude Desktop's title), `ai-title` (its generated one) and `agent-name` lines. The latest of each kind counts and the kinds rank in that order. `titles.rs` reads only what each transcript gained since the last pass and parses only lines that name a title kind. Like the Desktop records, the format is internal: read-only and best effort. A stored session out of memory without a title is looked at once by the 10 min pass.
+
+**Every 3 s**, while an idle session's last turn ended in the last hour and nobody has seen it (the displays show it as new), the seen pass looks for the person seeing it:
+
+- **Opened since.** Claude Desktop's `lastFocusedAt` for the session is later than the turn's end.
+- **On screen.** The session Claude Desktop shows (the latest `lastFocusedAt` of all), or a thread the Codex app marks read (`thread_read_receipts` in its state database, once its last published turn is the one that ended), while that app is in front and the keyboard or mouse was used in the last minute. Selected in an app behind a game is not seen. It counts after two passes running, so passing through on the way to another session does not. `front.rs` asks `lsappinfo` for the app in front, only when some session could be on screen; macOS only.
+- **Tapped on a display**, which reports it with `POST /v1/sessions/{key}/seen`. Covers what the apps cannot say: sessions in a terminal, a second screen, split view.
 
 **At start and every 10 min**, and on demand through `POST /v1/maintenance`:
 

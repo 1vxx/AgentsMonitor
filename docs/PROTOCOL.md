@@ -65,7 +65,7 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | --- | --- |
 | `GET /v1/health` | Name, version, protocol and uptime. Never requires a token |
 | `GET /v1/snapshot` | `{server, sessions, quotas, summary}` for the sessions in memory: running ones not idle for 2 h, and those ended in the last 30 min (both under `[sessions]` in the config) |
-| `GET /v1/summary` | The compact summary for display devices, its `ts` the time it is read. An item's `since` is when its status last changed, its `turn_since` when the turn in progress began (the prompt, or once the main loop has answered the first subagent still running), absent at rest. Its `last_turn.seen` says the person has opened the session since that turn ended, as Claude Desktop records it |
+| `GET /v1/summary` | The compact summary for display devices, its `ts` the time it is read. An item's `since` is when its status last changed, its `turn_since` when the turn in progress began (the prompt, or once the main loop has answered the first subagent still running), absent at rest. Its `last_turn.seen` says the person has seen that turn: opened the session in Claude Desktop since it ended, had it on screen there or in the Codex app (see the seen pass in ARCHITECTURE.md), or tapped it on a display |
 | `GET /v1/sessions` | `scope=live` (default) returns sessions in memory; `scope=all` pages through the store. Also `agent`, `limit` (default 100, max 1,000) and `offset` |
 | `GET /v1/sessions/{key}` | One session, from memory or the store |
 | `GET /v1/sessions/{key}/events` | The session's timeline, newest first. `before` (a `seq`) and `limit` (default 200, max 2,000) |
@@ -81,6 +81,7 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | Route | Description |
 | --- | --- |
 | `DELETE /v1/sessions/{key}` | Forgets a session and its events. Its token counts are kept |
+| `POST /v1/sessions/{key}/seen` | The person saw the session's last turn on a display. Body `{"ended_at": ms}`, the end of the turn they saw, so a turn that ends while the request is on its way stays new; without it, now. `204`, or `404` for a session not in memory |
 | `POST /v1/maintenance` | Runs a cleanup pass now. `ended=all` also forgets every ended session. Returns `{forgotten, too_old, transcript_gone, ended, archived, db_bytes_before, db_bytes_after, duration_ms}` |
 
 ## WebSocket: `GET /v1/ws`

@@ -75,6 +75,7 @@ And what the host offers a theme:
 | `theme::state()` | The link, the latest summary, `now`, `wall`, `dt`, and the sessions waiting for you |
 | `theme::chime(cue)` | Plays a chime of the theme's own |
 | `theme::ack()` | Says the person has seen what waits, so the reminders stop |
+| `theme::seen(key, endedAt)` | Says the person looked at a session's finished turn here; the board tells the daemon, so it stops being new everywhere |
 | `theme::reminders(out, max)` | The reminders due this frame, taken at the point in `frame()` where the theme reacts to them |
 
 ## 🧰 The toolbox in `core/`

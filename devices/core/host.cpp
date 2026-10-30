@@ -3,6 +3,8 @@
 // here: reading summaries, the clocks, what happened between two summaries,
 // the shared chimes, and one press of the side button from two.
 
+#include <string.h>
+
 #include "gfx.h"
 #include "text.h"
 #include "theme.h"
@@ -17,6 +19,12 @@ int64_t summaryAt, summaryTs;  // our clock and the daemon's when the last summa
 bool fingerDown;
 bool remindersTaken;  // the theme took this frame's reminders itself
 int cues[8], cueHead, cueTail;
+struct Seen {
+  char key[sizeof model::Session::key];
+  int64_t endedAt;
+};
+Seen seens[4];  // turns looked at here, for the board to tell the daemon
+int seenHead, seenTail;
 
 // The chimes every theme shares, for what happened
 void shared(const events::Event &e) {
@@ -47,6 +55,15 @@ void chime(synth::Cue cue) {
 }
 
 void ack() { st.waits.ack(); }
+
+void seen(const char *key, int64_t endedAt) {
+  int next = (seenTail + 1) % 4;
+  if (next == seenHead) return;
+  strncpy(seens[seenTail].key, key, sizeof seens[seenTail].key - 1);
+  seens[seenTail].key[sizeof seens[seenTail].key - 1] = 0;
+  seens[seenTail].endedAt = endedAt;
+  seenTail = next;
+}
 
 int reminders(events::Event *out, int max) {
   remindersTaken = true;
@@ -146,6 +163,16 @@ int cue() {
   int c = cues[cueHead];
   cueHead = (cueHead + 1) % 8;
   return c;
+}
+
+bool seen(char *key, size_t len, int64_t *endedAt) {
+  using theme::seenHead, theme::seenTail, theme::seens;
+  if (seenHead == seenTail || !len) return false;
+  strncpy(key, seens[seenHead].key, len - 1);
+  key[len - 1] = 0;
+  *endedAt = seens[seenHead].endedAt;
+  seenHead = (seenHead + 1) % 4;
+  return true;
 }
 
 const char *screen() { return theme::instance().screen(); }

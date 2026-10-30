@@ -35,6 +35,10 @@ void frame(int64_t ms, int64_t wall = 0);
 void draw(uint16_t *band, int y0, int y1);
 // The next chime to play (a synth::Cue), or -1
 int cue();
+// The next finished turn the person looked at on the display, for the board
+// to tell the daemon (POST /v1/sessions/<key>/seen): its session's key and
+// when it ended. False when there is none.
+bool seen(char *key, size_t len, int64_t *endedAt);
 // Which screen shows, for the review page
 const char *screen();
 // Average milliseconds a frame spent since the last call recording, then

@@ -13,6 +13,8 @@ uint16_t fb[gfx::W * gfx::H];
 uint8_t rgba[gfx::W * gfx::H * 4];
 int16_t pcm[synth::MAX_SAMPLES];
 double drawMs;
+char seenKey[96];
+double seenEnded;
 }  // namespace
 
 extern "C" {
@@ -57,6 +59,17 @@ EMSCRIPTEN_KEEPALIVE uint8_t *am_frame(double ms, double wall, int rows) {
 EMSCRIPTEN_KEEPALIVE double am_draw_ms() { return drawMs; }
 
 EMSCRIPTEN_KEEPALIVE int am_cue() { return ui::cue(); }
+
+// The next finished turn looked at on the display: its session's key, or
+// null, and when it ended from am_seen_ended()
+EMSCRIPTEN_KEEPALIVE const char *am_seen() {
+  int64_t endedAt;
+  if (!ui::seen(seenKey, sizeof seenKey, &endedAt)) return nullptr;
+  seenEnded = double(endedAt);
+  return seenKey;
+}
+
+EMSCRIPTEN_KEEPALIVE double am_seen_ended() { return seenEnded; }
 
 // Renders a chime into the module's sample buffer; returns how many samples
 EMSCRIPTEN_KEEPALIVE int am_synth(int cue) { return synth::render(synth::Cue(cue), pcm, synth::MAX_SAMPLES); }

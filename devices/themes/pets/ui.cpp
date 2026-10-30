@@ -1465,6 +1465,15 @@ const char *nextPage(int dir) {
   return tracker.waits[(at + dir + tracker.count) % tracker.count].key;
 }
 
+// A tap on the pet: its session's last turn is seen, here and, through the
+// daemon, everywhere else
+void look(Pet &p) {
+  const Session *s = find(p.key);
+  if (!s) return;
+  if (unseen(p, *s)) theme::seen(s->key, s->endedAt);
+  p.tappedEnd = s->endedAt;
+}
+
 void tap(int x, int y) {
   // Any tap answers the reminders of the waits there are
   theme::ack();
@@ -1476,7 +1485,7 @@ void tap(int x, int y) {
     case ALL: {
       int i = petAt(x, y);
       if (i >= 0) {
-        if (const Session *s = find(pets[i].key)) pets[i].tappedEnd = s->endedAt;  // looked at on the display
+        look(pets[i]);
         choose(pets[i].key);
         go(ONE);
       }
@@ -1486,7 +1495,7 @@ void tap(int x, int y) {
       int i = onePetAt(x, y);
       if (i >= 0) {
         pets[i].pokeAt = host.now;
-        if (const Session *s = find(pets[i].key)) pets[i].tappedEnd = s->endedAt;
+        look(pets[i]);
       }
       break;
     }

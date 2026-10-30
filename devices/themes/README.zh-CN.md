@@ -75,6 +75,7 @@ host 提供给主题的：
 | `theme::state()` | 连接状态、最新的汇总、`now`、`wall`、`dt`，以及正在等你的会话 |
 | `theme::chime(cue)` | 播放主题自己的提示音 |
 | `theme::ack()` | 表示用户已经看过在等的事，提醒停止 |
+| `theme::seen(key, endedAt)` | 表示用户在屏幕上看过某个会话刚结束的那一轮；开发板会告诉 daemon，让它在所有地方都不再算新的 |
 | `theme::reminders(out, max)` | 这一帧到期的提醒，在 `frame()` 里主题想做出反应的地方取 |
 
 ## 🧰 `core/` 里的工具箱

@@ -81,6 +81,8 @@ pub struct Presence {
     pub transcript: Option<String>,
     /// When its last turn ended, if the person has not opened it since.
     pub unseen_since: Option<i64>,
+    /// When its last turn began, when known.
+    pub turn_began: Option<i64>,
     /// Neither at work nor waiting, and not gone quiet.
     pub idle: bool,
 }
@@ -788,13 +790,14 @@ impl Hub {
                     .as_ref()
                     .filter(|t| s.seen_at.is_none_or(|at| at < t.ended_at))
                     .map(|t| t.ended_at),
+                turn_began: s.last_turn.as_ref().and_then(|t| Some(t.ended_at - t.duration_ms? as i64)),
                 idle: s.status == Status::Idle && !s.stale,
             })
             .collect()
     }
 
-    /// When the person last opened each session, as the apps record it; later
-    /// times only. Returns how many changed.
+    /// When the person last saw each session, as the apps record it or a
+    /// display reports it; later times only. Returns how many changed.
     pub fn set_seen(&self, seen: &[(String, i64)]) -> usize {
         let mut st = self.state.lock();
         let mut out = Vec::new();

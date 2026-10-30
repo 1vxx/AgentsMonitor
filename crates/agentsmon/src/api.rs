@@ -46,6 +46,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/v1/sessions", get(sessions))
         .route("/v1/sessions/{key}", get(session).delete(forget))
         .route("/v1/sessions/{key}/events", get(session_events))
+        .route("/v1/sessions/{key}/seen", post(seen))
         .route("/v1/events", get(events))
         .route("/v1/quotas", get(quotas))
         .route("/v1/quotas/history", get(quota_history))
@@ -210,6 +211,32 @@ async fn session(State(api): State<Api>, Path(key): Path<String>) -> Response {
 
 async fn forget(State(api): State<Api>, Path(key): Path<String>) -> Response {
     api.hub.forget(&key);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Default, Deserialize)]
+struct SeenBody {
+    /// When the turn the person saw ended; now when left out.
+    ended_at: Option<i64>,
+}
+
+/// A display saying the person has looked at a session there: its last turn
+/// is no longer new anywhere. Naming the turn keeps a tap from also covering
+/// one that ended while the request was on its way.
+async fn seen(State(api): State<Api>, Path(key): Path<String>, body: Bytes) -> Response {
+    let body = if body.is_empty() {
+        SeenBody::default()
+    } else {
+        match serde_json::from_slice::<SeenBody>(&body) {
+            Ok(b) => b,
+            Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        }
+    };
+    if api.hub.session(&key).is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let now = now_ms();
+    api.hub.set_seen(&[(key, body.ended_at.map_or(now, |at| at.min(now)))]);
     StatusCode::NO_CONTENT.into_response()
 }
 

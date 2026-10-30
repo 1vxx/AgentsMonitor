@@ -165,6 +165,7 @@ Copy `boards/waveshare_amoled_175c/` to `boards/<your_board>/`, rename the `.ino
 | Touch | `ui::touch(DOWN / MOVE / UP, x, y, ms)` | optional |
 | Buttons | `ui::press(ms)` for the side button, `ui::summon(ms)` for a long hold | optional |
 | Sound | Play each `ui::cue()` with `core/synth` through your speaker | optional |
+| Seen | Send each `ui::seen(key, len, &endedAt)` to the daemon as `POST /v1/sessions/<key>/seen` with `{"ended_at": endedAt}`, so a turn tapped here stops being new everywhere | optional |
 
 `net.cpp` (polling over Wi-Fi) and the frame loop in the `.ino` usually carry over unchanged. **What the core needs:** an ESP32-S3-class chip with PSRAM, where the core keeps over 1 MB of buffers. A second core is optional: drawing splits across both when there are two (`gfx::split`), and runs one half after the other when there is one.
 

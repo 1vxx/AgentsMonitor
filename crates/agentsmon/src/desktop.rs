@@ -5,7 +5,8 @@
 //! `~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/`:
 //! `local_<id>.json`, whose `cliSessionId` is the Claude Code session id and
 //! `lastFocusedAt` when the person last switched to it (switching back to
-//! the app alone does not count), and `archived-sessions.idx`, the archived
+//! the app alone does not count; the latest of them all is the session the
+//! app shows), and `archived-sessions.idx`, the archived
 //! ones' local ids. Neither is a public
 //! format: everything here is read-only and best effort, and anything that
 //! does not read as expected is ignored.
@@ -64,10 +65,29 @@ impl Desktop {
     /// When the person last opened each of these Claude Code sessions in
     /// Claude Desktop. Reads a record again only when it was written since.
     pub fn opened(&mut self, ids: &HashSet<String>) -> Vec<(String, i64)> {
-        let mut out = Vec::new();
         if ids.is_empty() {
-            return out;
+            return Vec::new();
         }
+        self.read_records();
+        self.records
+            .values()
+            .filter_map(|(_, cli, at)| Some((cli.as_ref()?, (*at)?)))
+            .filter(|(cli, _)| ids.contains(*cli))
+            .map(|(cli, at)| (cli.clone(), at))
+            .collect()
+    }
+
+    /// The Claude Code session Claude Desktop shows: the one last switched
+    /// to, as of the last look at the records (by [`Desktop::opened`]).
+    pub fn selected(&self) -> Option<&str> {
+        self.records
+            .values()
+            .filter_map(|(_, cli, at)| Some((cli.as_deref()?, (*at)?)))
+            .max_by_key(|(_, at)| *at)
+            .map(|(cli, _)| cli)
+    }
+
+    fn read_records(&mut self) {
         let mut present = HashSet::new();
         for folder in self.folders() {
             let Ok(entries) = std::fs::read_dir(&folder) else { continue };
@@ -82,16 +102,10 @@ impl Desktop {
                     let (cli, focused) = record.map_or((None, None), |r| (r.cli_session_id, r.last_focused_at));
                     self.records.insert(path.clone(), (mtime, cli, focused));
                 }
-                present.insert(path.clone());
-                if let Some((_, Some(cli), Some(at))) = self.records.get(&path)
-                    && ids.contains(cli)
-                {
-                    out.push((cli.clone(), *at));
-                }
+                present.insert(path);
             }
         }
         self.records.retain(|p, _| present.contains(p));
-        out
     }
 
     /// Claude Code session ids of the sessions archived in Claude Desktop.
@@ -176,12 +190,15 @@ mod tests {
         let mut d = Desktop::at(root.clone());
         let ids = HashSet::from(["cli-a".to_string(), "cli-missing".to_string()]);
         assert_eq!(d.opened(&ids), vec![("cli-a".to_string(), 100)]);
+        // Switched to last, so the one showing
+        assert_eq!(d.selected(), Some("cli-b"));
 
         // Opening it again rewrites its record
         let path = record("local_a", "cli-a", 300);
         let later = SystemTime::now() + std::time::Duration::from_secs(1);
         std::fs::File::options().write(true).open(&path).unwrap().set_modified(later).unwrap();
         assert_eq!(d.opened(&ids), vec![("cli-a".to_string(), 300)]);
+        assert_eq!(d.selected(), Some("cli-a"));
 
         assert!(d.opened(&HashSet::new()).is_empty());
         std::fs::remove_dir_all(&root).ok();

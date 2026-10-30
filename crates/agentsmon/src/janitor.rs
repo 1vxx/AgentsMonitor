@@ -12,6 +12,7 @@ use serde::Serialize;
 use crate::codex::Threads;
 use crate::config::Retention;
 use crate::desktop::Desktop;
+use crate::front;
 use crate::hub::Hub;
 use crate::store::{self, Cutoffs, Op};
 use crate::titles::{self, Titles};
@@ -101,6 +102,10 @@ pub struct Watch {
     titles: Titles,
     /// Stored sessions already looked at for a title, found or not.
     titles_tried: HashSet<String>,
+    /// The app in front while the person is at the machine.
+    front: fn() -> Option<String>,
+    /// Sessions on screen at the last seen pass.
+    glimpsed: HashSet<String>,
 }
 
 impl Default for Watch {
@@ -111,6 +116,8 @@ impl Default for Watch {
             codex: Threads::new(),
             titles: Titles::default(),
             titles_tried: HashSet::new(),
+            front: front::app_in_use,
+            glimpsed: HashSet::new(),
         }
     }
 }
@@ -186,27 +193,48 @@ pub fn quick_pass(hub: &Hub) -> Quick {
 const UNSEEN_MS: i64 = 60 * 60_000;
 
 /// The seen pass, every few seconds: for the idle sessions whose last turn
-/// ended in the last hour and that the person has not opened since, whether
-/// they have now, as Claude Desktop records it. Nothing is read while there
-/// are none, which is most of the time.
+/// ended in the last hour and that the person has not seen since, whether
+/// they have now. Seen is opened since, as Claude Desktop records it, or on
+/// screen for two passes running: the session Claude Desktop shows, or a
+/// thread the Codex app marks read, while that app is in front and the
+/// person at the machine. Nothing is read while there are none, which is
+/// most of the time.
 pub fn seen_pass(hub: &Hub) -> usize {
+    use agentsmon_protocol::Session;
+    use agentsmon_protocol::agents::{CLAUDE_CODE, CODEX};
     let now = now_ms();
     let unseen: Vec<_> = hub
         .presence()
         .into_iter()
         .filter(|p| p.idle && !p.ended && p.unseen_since.is_some_and(|end| now - end < UNSEEN_MS))
         .collect();
+    let mut watch = hub.watch.lock();
+    let w = &mut *watch;
     if unseen.is_empty() {
+        w.glimpsed.clear();
         return 0;
     }
-    let claude: HashSet<String> = unseen
-        .iter()
-        .filter(|p| p.agent == agentsmon_protocol::agents::CLAUDE_CODE)
-        .map(|p| p.session_id.clone())
-        .collect();
-    let opened = hub.watch.lock().desktop.opened(&claude);
-    let key = |id: &String| agentsmon_protocol::Session::key_for(agentsmon_protocol::agents::CLAUDE_CODE, id);
-    let seen: Vec<(String, i64)> = opened.iter().map(|(id, at)| (key(id), *at)).collect();
+    let claude: HashSet<String> =
+        unseen.iter().filter(|p| p.agent == CLAUDE_CODE).map(|p| p.session_id.clone()).collect();
+    let mut seen: Vec<(String, i64)> =
+        w.desktop.opened(&claude).into_iter().map(|(id, at)| (Session::key_for(CLAUDE_CODE, &id), at)).collect();
+
+    let shown = w.desktop.selected().filter(|id| claude.contains(*id)).map(|id| Session::key_for(CLAUDE_CODE, id));
+    let turns: Vec<(String, i64)> =
+        unseen.iter().filter(|p| p.agent == CODEX).filter_map(|p| Some((p.session_id.clone(), p.turn_began?))).collect();
+    let read = if turns.is_empty() { Vec::new() } else { w.codex.read(&turns) };
+    let mut showing = HashSet::new();
+    if shown.is_some() || !read.is_empty() {
+        match (w.front)().as_deref() {
+            Some(front::CLAUDE_APP) => showing.extend(shown),
+            Some(front::CODEX_APP) => showing.extend(read.iter().map(|id| Session::key_for(CODEX, id))),
+            _ => {}
+        }
+    }
+    // Twice, so passing through on the way to another does not count
+    seen.extend(showing.iter().filter(|k| w.glimpsed.contains(*k)).map(|k| (k.clone(), now)));
+    w.glimpsed = showing;
+    drop(watch);
     hub.set_seen(&seen)
 }
 
@@ -363,7 +391,7 @@ mod tests {
         for sid in ["recent", "old", "busy"] {
             std::fs::write(folder.join(format!("local_{sid}.json")), format!(r#"{{"cliSessionId":"{sid}","lastFocusedAt":{now}}}"#)).unwrap();
         }
-        *hub.watch.lock() = Watch { desktop: Desktop::at(dir.join("desktop")), ..Watch::default() };
+        *hub.watch.lock() = Watch { desktop: Desktop::at(dir.join("desktop")), front: || None, ..Watch::default() };
 
         let event = |sid: &str, ts: i64, rest: &str| {
             serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{ts},{rest}}}"#)).unwrap()
@@ -388,6 +416,71 @@ mod tests {
         assert_eq!((seen("recent"), seen("old"), seen("busy")), (Some(now), None, None));
         // Seen now, it is not looked for again
         assert_eq!(seen_pass(&hub), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_session_on_screen_two_passes_running_is_seen() {
+        let dir = std::env::temp_dir().join(format!("agentsmon-on-screen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
+        let now = now_ms();
+        let (began, ended) = (now - 90_000, now - 60_000);
+        // Claude Desktop switched to "shown" before its turn ended, "behind" before that
+        let folder = dir.join("desktop").join("acct").join("org");
+        std::fs::create_dir_all(&folder).unwrap();
+        for (sid, at) in [("shown", now - 120_000), ("behind", now - 200_000)] {
+            std::fs::write(folder.join(format!("local_{sid}.json")), format!(r#"{{"cliSessionId":"{sid}","lastFocusedAt":{at}}}"#)).unwrap();
+        }
+        // The Codex app marks "read" read through its last turn, "unread" not
+        let codex = dir.join("codex");
+        std::fs::create_dir_all(&codex).unwrap();
+        let hex = format!("{began:012x}");
+        let turn = format!("{}-{}-7000-8000-000000000000", &hex[..8], &hex[8..]);
+        rusqlite::Connection::open(codex.join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE thread_read_receipts (thread_id TEXT PRIMARY KEY NOT NULL, first_unread_turn TEXT, revision TEXT NOT NULL, last_published_turn TEXT);
+                 INSERT INTO thread_read_receipts VALUES ('read', NULL, 'r1', '{turn}'), ('unread', '{turn}', 'r2', '{turn}');"
+            ))
+            .unwrap();
+        *hub.watch.lock() =
+            Watch { desktop: Desktop::at(dir.join("desktop")), codex: Threads::at(codex), front: || None, ..Watch::default() };
+
+        let event = |agent: &str, sid: &str, ts: i64, rest: &str| {
+            serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"{agent}","sid":"{sid}","ts":{ts},{rest}}}"#)).unwrap()
+        };
+        let mut batch = Vec::new();
+        for (agent, sid) in [("claude-code", "shown"), ("claude-code", "behind"), ("codex", "read"), ("codex", "unread")] {
+            batch.push(event(agent, sid, began, r#""type":"turn.start""#));
+            batch.push(event(agent, sid, ended, r#""type":"turn.end","outcome":"answer""#));
+        }
+        hub.ingest(batch);
+        let seen = |key: &str| hub.session(key).and_then(|s| s.seen_at).is_some_and(|at| at >= ended);
+        let all = ["claude-code:shown", "claude-code:behind", "codex:read", "codex:unread"];
+        let seen_now = || all.iter().filter(|k| seen(k)).copied().collect::<Vec<_>>();
+
+        // Nobody in front: nothing on screen
+        seen_pass(&hub);
+        seen_pass(&hub);
+        assert!(seen_now().is_empty());
+        // Claude Desktop in front: the session it shows, once seen twice
+        hub.watch.lock().front = || Some(front::CLAUDE_APP.into());
+        seen_pass(&hub);
+        assert!(seen_now().is_empty());
+        seen_pass(&hub);
+        assert_eq!(seen_now(), ["claude-code:shown"]);
+        // A glimpse of Codex in between starts over
+        hub.watch.lock().front = || Some(front::CODEX_APP.into());
+        seen_pass(&hub);
+        hub.watch.lock().front = || None;
+        seen_pass(&hub);
+        hub.watch.lock().front = || Some(front::CODEX_APP.into());
+        seen_pass(&hub);
+        assert_eq!(seen_now(), ["claude-code:shown"]);
+        seen_pass(&hub);
+        assert_eq!(seen_now(), ["claude-code:shown", "codex:read"]);
         std::fs::remove_dir_all(&dir).ok();
     }
 
