@@ -351,7 +351,8 @@ fn fold(
 
 /// Gives freed pages back and cuts the write-ahead log down.
 fn compact(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch("PRAGMA incremental_vacuum;")?;
+    // It frees a page per row, so every row has to be read.
+    conn.pragma_query(None, "incremental_vacuum", |_| Ok(()))?;
     conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
 }
 
@@ -750,6 +751,8 @@ mod tests {
         store.send(Op::Maintain(Cutoffs { token_daily: day, ..cut }));
         assert!(store.flush(std::time::Duration::from_secs(5)));
         assert_eq!(store.read(|c| token_report(c, 0, i64::MAX, None, None)).unwrap().0.requests, 800);
+        let free = store.read(|c| c.pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))).unwrap();
+        assert_eq!(free, 0, "every freed page goes back, not only the first");
         assert!(store.disk_bytes() <= size_before, "compaction must not grow the file");
         std::fs::remove_dir_all(&dir).ok();
     }
