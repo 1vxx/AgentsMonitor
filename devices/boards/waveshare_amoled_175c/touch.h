@@ -15,5 +15,7 @@ struct Event {
 bool begin();
 // Reads the controller when it has something new; call once a frame
 Event poll();
+// A finger is on the glass
+bool held();
 
 }  // namespace touch

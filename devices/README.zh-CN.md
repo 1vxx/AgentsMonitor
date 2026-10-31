@@ -71,6 +71,8 @@ python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 
 `her` 的点击是留给她自己的：见[和她互动](themes/her/README.zh-CN.md#-和她互动)。
 
+**倒过来放**：把板子倒着立起来，大约半秒后屏幕和触摸都会跟着转过来。平放或侧放时保持原样。
+
 **声音**：有会话开始等你时响一声，一轮完成时轻轻响一声，一轮出错时低沉地响一声。等待一直没人处理的话，会在 2 分钟、5 分钟时再提醒，之后每 10 分钟一次，直到你轻点屏幕。
 
 ## 🔧 制作参考设备
@@ -83,6 +85,7 @@ python3 -m http.server 8466 --bind 127.0.0.1 --directory devices
 | 屏幕 | 1.75 英寸圆形 AMOLED，466 × 466，CO5300，QSPI 接口 | `panel.cpp` |
 | 触摸 | CST9217 | `touch.cpp` |
 | 按键 | PWR 经 AXP2101 电源芯片读取，BOOT 在 GPIO0 | `button.cpp` |
+| 运动传感器 | QMI8658，用来判断朝向 | `tilt.cpp` |
 | 扬声器 | ES8311 编解码芯片，I2S 接口 | `audio.cpp` |
 | 网络 | Wi-Fi，2.4 GHz | `net.cpp` |
 

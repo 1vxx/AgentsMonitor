@@ -1,11 +1,16 @@
 // AgentsMonitor's display, for the Waveshare ESP32-S3-Touch-AMOLED-1.75C.
 //
 // The screens are a theme from devices/themes on devices/core, the same code
-// the review page runs (build.sh copies them into src/). Core 1 reads touch
-// and the side buttons, feeds the UI summaries and works out each frame;
-// then both cores draw it a band of rows at a time in
-// internal RAM, and each band goes to the panel by DMA while more are drawn.
+// the review page runs (build.sh copies them into src/). Core 1 reads touch,
+// the side buttons and which way up the board stands, feeds the UI summaries
+// and works out each frame; then both cores draw it a band of rows at a time
+// in internal RAM, and each band goes to the panel by DMA while more are drawn.
 // Core 0 also fetches summaries over Wi-Fi and plays chimes.
+//
+// Upside down is the board's business alone: the theme draws the same frame,
+// each band goes out back to front to the rows opposite, and touches are
+// turned to match. The CO5300 has flip bits, but with a window a band at a time
+// they left the picture in stripes.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -24,6 +29,7 @@
 #include "src/ui/jpeg.h"
 #include "src/ui/synth.h"
 #include "src/ui/ui.h"
+#include "tilt.h"
 #include "touch.h"
 
 static char *json;
@@ -40,11 +46,26 @@ static std::atomic<int> nextBand;
 static uint32_t firstBand;                // the count at this frame's first band
 static volatile uint32_t drawn[BUFFERS];  // n + 1 once band n is drawn
 static uint32_t queued;                   // bands handed to the panel
+static bool upsideDown;                   // set between frames
 static SemaphoreHandle_t sendLock, helperGo, helperDone;
 
 static int64_t nowMs() { return esp_timer_get_time() / 1000; }
 
 static int bandRows(int b) { return b * BAND_ROWS + BAND_ROWS < H ? BAND_ROWS : H - b * BAND_ROWS; }
+
+// The nth band of a frame to go out. The panel's top comes first, the way it
+// scans, so an upside-down frame tears no differently: that is its last band.
+static int bandAt(int n) { return upsideDown ? BANDS - 1 - n : n; }
+
+// Half a turn, in place
+static void IRAM_ATTR turnBand(uint16_t *band, int rows) {
+  uint16_t *a = band, *b = band + rows * W - 1;
+  while (a < b) {
+    uint16_t p = *a;
+    *a++ = *b;
+    *b-- = p;
+  }
+}
 
 // Draws bands of the frame until none are left; both cores run it
 static void drawBands() {
@@ -54,13 +75,15 @@ static void drawBands() {
     // The band drawn in this buffer before must be out first
     while (panel::sent() + BUFFERS <= n) {
     }
-    ui::draw(buffers[k], b * BAND_ROWS, b * BAND_ROWS + bandRows(b));
+    int at = bandAt(b);
+    ui::draw(buffers[k], at * BAND_ROWS, at * BAND_ROWS + bandRows(at));
+    if (upsideDown) turnBand(buffers[k], bandRows(at));
     drawn[k] = n + 1;
     // Queue it, and any after it the other core finished first
     xSemaphoreTake(sendLock, portMAX_DELAY);
     while (drawn[queued % BUFFERS] == queued + 1) {
-      int q = queued - firstBand;
-      panel::send(buffers[queued % BUFFERS], q * BAND_ROWS, bandRows(q));
+      int q = bandAt(queued - firstBand), y0 = q * BAND_ROWS, rows = bandRows(q);
+      panel::send(buffers[queued % BUFFERS], upsideDown ? H - y0 - rows : y0, rows);
       queued++;
     }
     xSemaphoreGive(sendLock);
@@ -113,6 +136,7 @@ void setup() {
   Serial.printf("display: UI ready in %u ms\n", millis() - t0);
   if (!touch::begin()) Serial.println("display: touch not found");
   if (!button::begin()) Serial.println("display: power chip not found, PWR button off");
+  if (!tilt::begin()) Serial.println("display: motion sensor not found, staying this way up");
   if (!audio::begin()) Serial.println("display: audio init failed");
   audio::play(synth::DONE);  // a soft chime says the speaker works
 
@@ -138,10 +162,17 @@ void loop() {
   if (net::take(json, JSON_MAX)) ui::summary(json);
 
   touch::Event e = touch::poll();
-  if (e.kind != touch::NONE) ui::touch(ui::Touch(e.kind - 1), e.x, e.y, nowMs());
+  if (e.kind != touch::NONE) {
+    if (upsideDown) e.x = W - 1 - e.x, e.y = H - 1 - e.y;
+    ui::touch(ui::Touch(e.kind - 1), e.x, e.y, nowMs());
+  }
   button::Event b = button::poll();
   if (b == button::PRESS) ui::press(nowMs());
   if (b == button::HOLD) ui::summon(nowMs());
+
+  // Not under a finger, whose drag would jump across the screen
+  bool turned = tilt::upsideDown();
+  if (!touch::held()) upsideDown = turned;
 
   uint32_t t0 = micros();
   ui::frame(nowMs());
@@ -159,9 +190,10 @@ void loop() {
   if (ms - statAt >= 1000) {
     char line[400], parts[240];
     ui::timings(parts, sizeof parts);
-    snprintf(line, sizeof line, "up %lus  fps %.1f  frame %.1f ms  screen %s  link %d  wifi %d  ram %uK | %s", (unsigned long)(ms / 1000),
-             frames * 1000.f / (ms - statAt), frameUs / 1000.f / frames, ui::screen(), link, int(WiFi.status()),
-             unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), parts);
+    const float *g = tilt::gravity();
+    snprintf(line, sizeof line, "up %lus  fps %.1f  frame %.1f ms  screen %s  link %d  wifi %d  ram %uK  g %.2f %.2f %.2f%s | %s",
+             (unsigned long)(ms / 1000), frames * 1000.f / (ms - statAt), frameUs / 1000.f / frames, ui::screen(), link, int(WiFi.status()),
+             unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), g[0], g[1], g[2], upsideDown ? " flipped" : "", parts);
     Serial.println(line);
     statAt = ms, frames = 0, frameUs = 0;
   }

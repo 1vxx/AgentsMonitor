@@ -51,4 +51,6 @@ Event poll() {
   return {UP, lastX, lastY};
 }
 
+bool held() { return down; }
+
 }  // namespace touch

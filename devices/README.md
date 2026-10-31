@@ -71,6 +71,8 @@ Want a look of your own? The [theme guide](themes/README.md) takes you from a co
 
 `her` keeps taps for herself: see [Talking back](themes/her/README.md#-talking-back).
 
+**Upside down.** Stand the board the other way up and the screen and touch follow in about half a second. Lying flat or on its side, it stays as it was.
+
 **Sounds.** A chime when a session starts waiting for you, a soft one when a turn finishes, a low one when a turn fails. If nobody answers a wait, the display reminds you again at 2 and 5 minutes, then every 10 minutes, until you tap it.
 
 ## 🔧 Build the reference display
@@ -83,6 +85,7 @@ Want a look of your own? The [theme guide](themes/README.md) takes you from a co
 | Screen | 1.75" round AMOLED, 466 × 466, CO5300 over QSPI | `panel.cpp` |
 | Touch | CST9217 | `touch.cpp` |
 | Buttons | PWR via the AXP2101 power chip, BOOT on GPIO0 | `button.cpp` |
+| Motion | QMI8658, for which way up it stands | `tilt.cpp` |
 | Speaker | ES8311 codec over I2S | `audio.cpp` |
 | Network | Wi-Fi, 2.4 GHz | `net.cpp` |
 
