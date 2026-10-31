@@ -100,7 +100,8 @@ pub struct Watch {
     codex: Threads,
     /// How far each live session's transcript has been read for its title.
     titles: Titles,
-    /// Stored sessions already looked at for a title, found or not.
+    /// Stored sessions already looked at for a title, found or not, while
+    /// the store lists them as untitled.
     titles_tried: HashSet<String>,
     /// The app in front while the person is at the machine.
     front: fn() -> Option<String>,
@@ -250,6 +251,8 @@ fn backfill_titles(hub: &Hub) {
         }
     };
     let mut watch = hub.watch.lock();
+    let listed: HashSet<&String> = untitled.iter().map(|(key, _)| key).collect();
+    watch.titles_tried.retain(|key| listed.contains(key));
     let mut titled = 0;
     for (key, path) in untitled {
         if in_memory.contains(&key) || !watch.titles_tried.insert(key.clone()) {
@@ -375,6 +378,39 @@ mod tests {
         assert_eq!((all.forgotten, all.pass.ended), (1, 1));
         let left: Vec<String> = hub.sessions().into_iter().map(|s| s.key).collect();
         assert_eq!(left, vec!["claude-code:live".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn remembers_the_titles_tried_only_while_the_store_lists_them() {
+        let dir = std::env::temp_dir().join(format!("agentsmon-backfill-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
+        let file = |sid: &str| dir.join(format!("{sid}.jsonl")).to_string_lossy().to_string();
+        let env = |json: String| serde_json::from_str::<agentsmon_protocol::Envelope>(&json).unwrap();
+        // Stored and out of memory, with no title in their transcripts
+        for sid in ["kept", "forgotten"] {
+            std::fs::write(file(sid), "{}").unwrap();
+            hub.ingest(vec![
+                env(format!(r#"{{"agent":"claude-code","sid":"{sid}","type":"session.start","transcript_path":"{}"}}"#, file(sid))),
+                env(format!(r#"{{"agent":"claude-code","sid":"{sid}","type":"session.end"}}"#)),
+            ]);
+        }
+        hub.hide_many(&["claude-code:kept".into(), "claude-code:forgotten".into()]);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        backfill_titles(&hub);
+        assert_eq!(hub.watch.lock().titles_tried.len(), 2);
+
+        hub.forget("claude-code:forgotten");
+        std::fs::write(file("kept"), "{\"type\":\"ai-title\",\"aiTitle\":\"Late\"}\n").unwrap();
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        backfill_titles(&hub);
+        assert!(hub.store().flush(std::time::Duration::from_secs(5)));
+        // Gone from the store, it is let go; still listed, it is not read twice
+        assert_eq!(hub.watch.lock().titles_tried, HashSet::from(["claude-code:kept".to_string()]));
+        let stored = hub.store().read(|c| store::session(c, "claude-code:kept")).unwrap().unwrap();
+        assert_eq!(stored.meta.title, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 

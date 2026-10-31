@@ -36,7 +36,8 @@ pub struct Desktop {
     root: PathBuf,
     /// Per account/org folder: the index's mtime when read, and what it listed.
     indexes: HashMap<PathBuf, (SystemTime, Vec<String>)>,
-    /// Local id to Claude Code session id, read once per session.
+    /// Local id to Claude Code session id, read once per session while an
+    /// index lists it.
     cli_ids: HashMap<String, Option<String>>,
     /// Each record as last read: when it was written, its Claude Code session
     /// id and when the session was last opened.
@@ -112,6 +113,7 @@ impl Desktop {
     /// Re-reads an index only when it changed; empty without Claude Desktop.
     pub fn archived(&mut self) -> HashSet<String> {
         let mut out = HashSet::new();
+        let mut changed = false;
         for folder in self.folders() {
             let index = folder.join(INDEX);
             let Ok(mtime) = std::fs::metadata(&index).and_then(|m| m.modified()) else { continue };
@@ -122,6 +124,7 @@ impl Desktop {
                     .map(|i| i.archived)
                     .unwrap_or_default();
                 self.indexes.insert(folder.clone(), (mtime, listed));
+                changed = true;
             }
             let Some((_, listed)) = self.indexes.get(&folder) else { continue };
             for local in listed {
@@ -135,6 +138,10 @@ impl Desktop {
                     out.insert(id.clone());
                 }
             }
+        }
+        if changed {
+            let listed: HashSet<&String> = self.indexes.values().flat_map(|(_, ids)| ids).collect();
+            self.cli_ids.retain(|local, _| listed.contains(local));
         }
         out
     }
@@ -167,6 +174,10 @@ mod tests {
         let later = SystemTime::now() + std::time::Duration::from_secs(1);
         std::fs::File::options().write(true).open(folder.join(INDEX)).unwrap().set_modified(later).unwrap();
         assert_eq!(d.archived(), HashSet::from(["cli-a".to_string(), "cli-b".to_string()]));
+        // What left the index is let go.
+        let mut kept: Vec<&str> = d.cli_ids.keys().map(String::as_str).collect();
+        kept.sort();
+        assert_eq!(kept, ["local_a", "local_b"]);
 
         assert!(Desktop::at(root.join("nowhere")).archived().is_empty());
         std::fs::remove_dir_all(&root).ok();
