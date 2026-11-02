@@ -40,6 +40,7 @@ pub fn normalize(p: &Value) -> Result<Normalized, AdapterError> {
             vec![
                 Event::Prompt { preview: text.clone() },
                 Event::TurnStart { turn_id: owned("prompt_id"), agent_id: None, preview: text },
+                Event::Attend { leaving: false },
             ]
         }
         "PreToolUse" => {
@@ -140,9 +141,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(out.meta.cwd.as_deref(), Some("/w"));
-        assert_eq!(out.events.len(), 2);
+        assert_eq!(out.events.len(), 3);
         assert!(matches!(&out.events[0], Event::Prompt { preview: Some(p) } if p == "fix the bug"));
         assert!(matches!(&out.events[1], Event::TurnStart { agent_id: None, .. }));
+        assert!(matches!(&out.events[2], Event::Attend { leaving: false }));
     }
 
     #[test]

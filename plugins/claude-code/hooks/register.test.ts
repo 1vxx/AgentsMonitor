@@ -5,7 +5,7 @@ type Sent = { type: string; sid?: string; [field: string]: unknown }
 
 // Stands in for the engine beneath the plugin and for the daemon: answers
 // what the plugin asks of the session and records every batch it posts
-const engine = (on: On, options: { down?: boolean } = {}) => {
+const engine = (on: On, options: { down?: boolean; tty?: string } = {}) => {
   const posts: { socketPath?: string; events: Sent[] }[] = []
   const state = { down: options.down === true }
   on('session.id', () => ({ value: 'sess-1' }))
@@ -36,6 +36,9 @@ const engine = (on: On, options: { down?: boolean } = {}) => {
   // No settings hooks: each classic event settles with nothing to say
   on('classic.SessionStart', () => ({}))
   on('session.attach', (_$, e) => ({ clientId: e.clientId }))
+  on('session.detach', (_$, e) => ({ clientId: e.clientId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: `${options.tty ?? 'ttys012'}\n`, stderr: '' } }))
   on('classic.PermissionRequest', () => ({}))
   const sent = () => posts.flatMap(p => p.events)
   return { posts, sent, state }
@@ -56,11 +59,11 @@ test('a turn reaches the daemon in order, after the hooks returned', async ($, o
   await clock.settle()
 
   const types = sent().map(e => e.type)
-  expect(types).toEqual(['session.start', 'usage', 'prompt', 'turn.start', 'tool.start', 'tool.end', 'turn.end'])
+  expect(types).toEqual(['session.start', 'usage', 'attend', 'prompt', 'turn.start', 'tool.start', 'tool.end', 'turn.end'])
   expect(posts[0]?.socketPath).toBe('/Users/me/.agentsmon/agentsmon.sock')
   expect(sent().every(e => e.sid === 'sess-1' && e.agent === 'claude-code')).toBe(true)
 
-  const [start, usage, prompt, , tool] = sent()
+  const [start, usage, , prompt, , tool] = sent()
   expect(start).toMatchObject({ source: 'startup', project: 'demo-repo', model: 'claude-opus-5-5', interactive: true })
   expect(usage).toMatchObject({ rate_limits: [{ kind: 'five_hour', percent_used: 12.5 }], cost_usd: 0.25 })
   expect(prompt?.preview).toBe('fix the bug')
@@ -112,6 +115,94 @@ test('a non-interactive session announces itself once a window attaches', async 
   expect(sent()[0]).toMatchObject({ type: 'session.start', source: 'startup', sid: 'sess-1', project: 'demo-repo' })
 })
 
+test('opening a session and leaving it tell the daemon the person was there', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: null, isInteractive: false })
+  await $.session.attach({ surface: 'desktop', clientId: 'c1' })
+  await clock.settle()
+  await $.session.detach({ surface: 'desktop', clientId: 'c1', reason: 'detach' })
+  await clock.settle()
+  await $.session.attach({ surface: 'desktop', clientId: 'c1' })
+  await $.session.detach({ surface: 'desktop', clientId: 'c1', reason: 'end' })
+  await clock.settle()
+
+  expect(sent().filter(e => e.type === 'attend').map(e => e.leaving ?? false)).toEqual([false, true, false])
+})
+
+test('a warm spare left unused says nothing of anyone leaving', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { posts } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: null, isInteractive: false })
+  await $.session.detach({ surface: 'desktop', clientId: 'c1', reason: 'detach' })
+  await clock.settle()
+  expect(posts.length).toBe(0)
+})
+
+const submit = (kind: string) => ({ text: 'go', wait: false, origin: { kind } }) as never
+
+test('only what a person sent counts as turning to the session', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' })
+  const { sent } = engine(on)
+  const attends = () => sent().filter(e => e.type === 'attend').length
+
+  await $.session.start({ cwd: '/work/demo', surface: null, isInteractive: false })
+  for (const kind of ['task-notification', 'scheduled-trigger', 'auto-continuation', 'peer']) await $.prompt.submit(submit(kind))
+  await clock.settle()
+  expect(attends()).toBe(0)
+
+  for (const kind of ['composer', 'bridge', 'sdk']) await $.prompt.submit(submit(kind))
+  await clock.settle()
+  expect(attends()).toBe(3)
+})
+
+test('starting a session at a terminal is someone turning to it', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent().filter(e => e.type === 'attend').length).toBe(1)
+})
+
+test('a script is nobody turning to the session', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' })
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: null, isInteractive: false })
+  await $.prompt.submit(submit('sdk'))
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.settle()
+  expect(sent().some(e => e.type === 'attend')).toBe(false)
+})
+
+test('a session at a terminal says which one', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent()[0]).toMatchObject({ type: 'session.start', tty: 'ttys012' })
+})
+
+test('a session with no terminal says none', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on, { tty: '??' })
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent()[0]?.tty).toBeUndefined()
+})
+
 test('a heartbeat says whether work is in flight', async ($, on) => {
   const clock = mock.clock(on)
   mock.env(on, {})
@@ -127,6 +218,30 @@ test('a heartbeat says whether work is in flight', async ($, on) => {
   expect(beats.map(b => b.busy)).toEqual([true, false])
 })
 
+test('a process that does no work says so once, then nothing about work', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  // Once for a process that died mid-turn; after that the same session, open
+  // in another window, may be at work there
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await clock.advance(60_000)
+  expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([false, undefined, undefined])
+})
+
+test('a turn between two heartbeats is still said to be over, once', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(40_000)
+  expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([false, undefined])
+})
+
 test('events wait while the daemon is away and go out once it is back', async ($, on) => {
   const clock = mock.clock(on)
   mock.env(on, {})
@@ -139,7 +254,7 @@ test('events wait while the daemon is away and go out once it is back', async ($
 
   state.down = false
   await clock.advance(1_000)
-  expect(sent().map(e => e.type)).toEqual(['session.start', 'usage', 'prompt', 'turn.start'])
+  expect(sent().map(e => e.type)).toEqual(['session.start', 'usage', 'attend', 'prompt', 'turn.start'])
 })
 
 test('a question and a permission prompt ask for the person', async ($, on) => {

@@ -7,7 +7,6 @@ mod client;
 mod codex;
 mod config;
 mod desktop;
-mod front;
 mod hub;
 mod janitor;
 mod otlp;
@@ -314,8 +313,8 @@ async fn run(cfg: Config) -> Result<(), String> {
             let _ = tokio::task::spawn_blocking(move || janitor::quick_pass(&hub)).await;
         }
     });
-    // A finished turn shows as unseen on the displays until the person opens
-    // its session; they look for that every few seconds.
+    // A finished turn shows as unseen on the displays until the person sees
+    // it; what the apps and terminals say of that is read every few seconds.
     let seen_hub = hub.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(3));

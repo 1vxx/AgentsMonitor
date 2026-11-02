@@ -57,7 +57,11 @@ pub fn normalize(p: &Value) -> Result<Normalized, AdapterError> {
         "UserPromptSubmit" => {
             ASKED.lock().remove(&sid);
             let prompt = text("prompt");
-            vec![Event::Prompt { preview: prompt.clone() }, Event::TurnStart { turn_id, agent_id: None, preview: prompt }]
+            vec![
+                Event::Prompt { preview: prompt.clone() },
+                Event::TurnStart { turn_id, agent_id: None, preview: prompt },
+                Event::Attend { leaving: false },
+            ]
         }
         "PreToolUse" => {
             let name = tool();
@@ -148,6 +152,7 @@ mod tests {
         assert_eq!(out.meta.transcript_path, None);
         assert!(matches!(&out.events[0], Event::Prompt { preview: Some(p) } if p == "fix it"));
         assert!(matches!(&out.events[1], Event::TurnStart { turn_id: Some(t), agent_id: None, .. } if t == "t1"));
+        assert!(matches!(&out.events[2], Event::Attend { leaving: false }));
     }
 
     #[test]

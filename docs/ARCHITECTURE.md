@@ -47,7 +47,7 @@ Events record only what is in flight: the main turn, running tools, subagents, a
 
 - The end of a main turn clears the main loop's tools and pending items. Background subagents remain until their own `turn.end`, or until a heartbeat reports `busy: false`.
 - A pending approval clears when its tool ends. A parallel tool ending does not clear it.
-- `busy: false` in a heartbeat means the integration has nothing in flight: the daemon drops any turn or tool whose end event was lost.
+- `busy: false` in a heartbeat means the integration has nothing in flight: the daemon drops any turn or tool whose end event was lost. The plugin says so once when a process starts, for what one that died left unfinished, and once after work it ran itself. Otherwise it leaves `busy` out: one session can be open in two windows, a process each, and one that did nothing would end the turn running in the other.
 - Activity on an ended session revives it (a resume, or heartbeats after a `lost` end).
 
 ## Liveness
@@ -67,7 +67,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 
 | Engine event | Canonical events |
 | --- | --- |
-| `session.start`, `classic.SessionStart` | `session.start`, sent once; the latter adds `source`, the session id, permission mode and transcript path |
+| `session.start`, `classic.SessionStart` | `session.start`, sent once; the latter adds `source`, the session id, permission mode and transcript path. A terminal session also sends `attend` |
 | `session.end` | `session.end`, sent within the exit budget. After `/clear` the plugin continues under the new id |
 | `turn.start`, `turn.complete` | `prompt`, `turn.start`, `turn.end` with subagent id, duration, token usage and answer preview |
 | `tool.call` (wrapping `next`) | `tool.start`, `tool.end`; `AskUserQuestion` also raises `attention` (input) |
@@ -76,9 +76,10 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | `classic.PreCompact`, `classic.PostCompact` | `compact.start`, `compact.end` |
 | `session.measure` | `usage`: context, cost, five-hour and seven-day windows |
 | `classic.UserPromptSubmit` | A heartbeat when the permission mode changed |
-| `session.attach` | Announces a session that was waiting to be used |
+| `session.attach`, `session.detach` | `attend`, `attend` with `leaving`; an attach also announces a session that was waiting to be used |
+| `prompt.submit` | `attend`, for a person's prompt: `composer` or `bridge`, or `sdk` unless the entry point is a script's (`sdk-*`) |
 
-**Announcing.** Interactive (terminal) sessions announce at launch. Non-interactive ones (Claude Desktop, SDK, `-p`) announce on first use: the first turn, the first tool call, or a surface attaching. Claude Desktop keeps a spare session warm for the next new session; until it is used, it never appears in the monitor. Metadata such as the project name is read at announce time, after the spare has been claimed.
+**Announcing.** Interactive (terminal) sessions announce at launch. Non-interactive ones (Claude Desktop, SDK, `-p`) announce on first use: the first turn, the first tool call, or a surface attaching. Claude Desktop keeps a spare session warm for the next new session; until it is used, it never appears in the monitor. Metadata such as the project name, and a terminal session's tty, is read at announce time, after the spare has been claimed.
 
 **Delivery.** Hooks only append to a queue. `$.clock.after(0)` sends after the hook's dispatch has resolved, so a session never waits on the monitor. One request is in flight at a time, which keeps events ordered. Failures retry with exponential backoff from 1 s to 30 s. The queue holds at most 1,000 events and drops the oldest. On announce, the plugin also reports `$.session.usage()`, so rate limits are known before the first answer.
 
@@ -93,7 +94,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | Codex hook | Canonical events |
 | --- | --- |
 | `SessionStart`, `SessionEnd` | `session.start` with `source`, `session.end` |
-| `UserPromptSubmit` | `prompt`, `turn.start` |
+| `UserPromptSubmit` | `prompt`, `turn.start`, `attend` |
 | `PreToolUse`, `PostToolUse` | `tool.start`, `tool.end`; `request_user_input` also raises `attention` (input) |
 | `PermissionRequest` | `attention` (permission) |
 | `Stop`, `Interrupt` | `turn.end` (answer, aborted) |
@@ -137,11 +138,18 @@ The janitor runs on three schedules.
 - A session that reappears after leaving memory (unarchived, or resumed days later) is reloaded from the store, so its statistics continue.
 - Each Claude Code session takes its title from its transcript, where Claude Code writes `custom-title` (a `/rename`, or Claude Desktop's title), `ai-title` (its generated one) and `agent-name` lines. The latest of each kind counts and the kinds rank in that order. `titles.rs` reads only what each transcript gained since the last pass and parses only lines that name a title kind. Like the Desktop records, the format is internal: read-only and best effort. A stored session out of memory without a title is looked at once by the 10 min pass.
 
-**Every 3 s**, while an idle session's last turn ended in the last hour and nobody has seen it (the displays show it as new), the seen pass looks for the person seeing it:
+**Every 3 s**, while an idle session's last turn ended in the last hour and nobody has seen it (the displays show it as new), the seen pass reads what each session runs in. Every finished turn starts unseen and stays so until something says the person saw it, as Codex's own receipts work. Only the program drawing a session knows what is on screen, so there is no one signal: each client says it its own way, and everything lands in the session's `seen_at`.
 
-- **Opened since.** Claude Desktop's `lastFocusedAt` for the session is later than the turn's end.
-- **On screen.** The session Claude Desktop shows (the latest `lastFocusedAt` of all), or a thread the Codex app marks read (`thread_read_receipts` in its state database, once its last published turn is the one that ended), while that app is in front and the keyboard or mouse was used in the last minute. Selected in an app behind a game is not seen. It counts after two passes running, so passing through on the way to another session does not. `front.rs` asks `lsappinfo` for the app in front, only when some session could be on screen; macOS only.
-- **Tapped on a display**, which reports it with `POST /v1/sessions/{key}/seen`. Covers what the apps cannot say: sessions in a terminal, a second screen, split view.
+- **Codex's receipts.** Codex marks every finished turn unread and its clients acknowledge it once they show it (the terminal client when it has the terminal's focus): `thread_read_receipts` in its state database, shared by all of them. A thread counts once its last published turn is the one that ended and nothing is unread.
+- **The terminal.** The plugin reports the session's tty, and the kernel stamps the device whenever the session reads input: keys, the mouse, and focus coming or going, which Claude Code asks the terminal to report. A session's own output moves nothing. Input read more than 2 s after the turn ended counts, so leaving the tab counts where the terminal reports focus; where it does not, only a key or the mouse does.
+
+What the sessions can tell, they tell themselves, with `attend`:
+
+- **Turned to.** A person's prompt, a session started at a terminal, or a window opening the session (`session.attach`; Claude Desktop and VS Code attach the session they show, and detach it when switching to another): what it finished is seen at once. Prompts sent by a schedule, a notification, another session or a script are not a person's.
+- **Left.** Turning to another session leaves the one the person last turned to, and a window closing leaves its session (`session.detach`): what it has finished by then is seen. A turn still running when they left stays new when it ends, which is what keeps work finishing in the background on the displays. The hub holds the session last turned to in memory, so a restart costs one such step.
+- **Tapped on a display**, which reports it with `POST /v1/sessions/{key}/seen`. Covers what nothing else can say.
+
+A turn that finished in view of a window behind others stays new until the person does one of these, and so does one read in a VS Code tab or a terminal that does not report focus, with nothing touched there.
 
 **At start and every 10 min**, and on demand through `POST /v1/maintenance`:
 

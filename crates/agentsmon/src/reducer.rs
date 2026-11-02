@@ -204,7 +204,7 @@ pub fn apply(s: &mut Session, ts: i64, ev: &Event) -> bool {
             }
             touch = false;
         }
-        Event::Notice { .. } | Event::Raw { .. } => touch = false,
+        Event::Notice { .. } | Event::Attend { .. } | Event::Raw { .. } => touch = false,
     }
 
     if ts > s.last_seen {

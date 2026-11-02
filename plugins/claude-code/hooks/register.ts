@@ -17,6 +17,9 @@ const RETRY_MIN_MS = 1_000
 const RETRY_MAX_MS = 30_000
 // Question tools put the session in "waiting for input" while they run
 const QUESTION_TOOLS = new Set(['AskUserQuestion'])
+// Where a person's prompt comes from. A host app's reads `sdk`, as a script's
+// does: its entry point tells them apart (`sdk-cli`, `sdk-ts`, ...)
+const PERSON_ORIGINS = new Set(['composer', 'bridge'])
 
 type Wire = { type: string; [field: string]: unknown }
 type Queued = Wire & { agent: string; sid?: string; ts: number }
@@ -30,6 +33,7 @@ type Meta = {
   surface?: string
   interactive?: boolean
   transcript_path?: string
+  tty?: string
 }
 
 // This load's view of the session. A reload starts it over and announces the
@@ -53,6 +57,11 @@ let heartbeat: { cancel: () => void } | undefined
 let mainTurn = false
 const agents = new Set<string>()
 let tools = 0
+// Whether a heartbeat still owes saying that no work runs here. One session can
+// be open in two windows, a process each: one that did nothing has nothing to
+// say about work, and its `false` would end the turn running in the other. A
+// new process owes it once, for what a process that died left unfinished
+let worked = true
 
 const queue: Queued[] = []
 let sending: Promise<void> | undefined
@@ -80,7 +89,11 @@ const usageEvent = (u: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>): W
   rate_limits: u.rateLimits.map(r => ({ kind: r.kind, percent_used: r.percentUsed, resets_at: r.resetsAt })),
 })
 
-const heartbeatEvent = (): Wire => ({ type: 'heartbeat', busy: busy(), ...meta })
+const heartbeatEvent = (): Wire => {
+  const said = busy() || worked ? busy() : undefined
+  worked = busy()
+  return { type: 'heartbeat', busy: said, ...meta }
+}
 
 // Starts reporting a session: at launch for one a person sits at, at first
 // use for any other
@@ -118,13 +131,20 @@ const start = ($: EngineInterface, source: string) => {
   schedule($, 0)
 }
 
+// The terminal this session runs in, whose device says when it was touched
+const terminal = async ($: EngineInterface) => {
+  const { stdout } = await $.process.run(['/bin/sh', '-c', 'ps -o tty= -p $PPID'])
+  return /^(tty|pts\/)/.test(stdout.trim()) ? stdout.trim() : undefined
+}
+
 const readMeta = async ($: EngineInterface) => {
-  const [cwd, model, surfaces, version, repo] = await Promise.all([
+  const [cwd, model, surfaces, version, repo, tty] = await Promise.all([
     $.session.cwd(),
     $.session.model(),
     $.session.surfaces(),
     $.session.version(),
     $.session.repo().catch(() => null),
+    meta.interactive ? terminal($).catch(() => undefined) : undefined,
   ])
   setMeta({
     cwd,
@@ -132,6 +152,7 @@ const readMeta = async ($: EngineInterface) => {
     surface: surfaces[0] ?? 'headless',
     agent_version: version.version,
     project: basename(repo?.root ?? cwd),
+    tty,
   })
 }
 
@@ -214,8 +235,11 @@ export const register: Register = (on, options) => {
 
   on('session.start', ($, e, next) => {
     setMeta({ interactive: e.isInteractive, cwd: e.cwd })
-    if (e.isInteractive) start($, 'startup')
-    else waiting = 'startup'
+    if (e.isInteractive) {
+      start($, 'startup')
+      // Only a person starts one at a terminal
+      emit($, { type: 'attend' })
+    } else waiting = 'startup'
     return next(e)
   })
 
@@ -230,7 +254,13 @@ export const register: Register = (on, options) => {
 
   // A window or a phone opened the session: someone is looking at it now
   on('session.attach', ($, e, next) => {
-    activate($)
+    emit($, { type: 'attend' })
+    return next(e)
+  })
+
+  // And turned away from it; a session that ends takes its windows with it
+  on('session.detach', ($, e, next) => {
+    if (e.reason === 'detach' && heartbeat !== undefined) emit($, { type: 'attend', leaving: true })
     return next(e)
   })
 
@@ -239,6 +269,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // A person spoke here, which also leaves the session they spoke to before
+  on('prompt.submit', async ($, e, next) => {
+    const scripted = e.origin.kind === 'sdk' && ((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '').startsWith('sdk-')
+    if (PERSON_ORIGINS.has(e.origin.kind) || (e.origin.kind === 'sdk' && !scripted)) emit($, { type: 'attend' })
+    return next(e)
+  }).catch((_$, e, next) => next(e))
+
   // The permission mode can change any time (shift+tab): pick it up per prompt
   on('classic.UserPromptSubmit', ($, e, next) => {
     if (setMeta({ permission_mode: e.permission_mode })) emit($, heartbeatEvent())
@@ -246,6 +283,7 @@ export const register: Register = (on, options) => {
   }).catch((_$, e, next) => next(e))
 
   on('turn.start', ($, e, next) => {
+    worked = true
     if (e.agentId === undefined) {
       mainTurn = true
       const prompt = text(e.text, PROMPT_CHARS)

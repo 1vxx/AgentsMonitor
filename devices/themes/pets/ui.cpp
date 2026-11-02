@@ -14,8 +14,8 @@
 // where it is. The side button once goes back to ONE and whoever leads it,
 // twice to ALL.
 //
-// A finished turn stays with its pet until the person opens the session on
-// the computer (the daemon says so), starts another turn, or taps the pet:
+// A finished turn stays with its pet until the person has seen it on the
+// computer (the daemon says so), starts another turn, or taps the pet:
 // it stays up smiling by a heart (or wincing under smoke), hops now and
 // then, leads ONE when nobody waits, and chimes once more after 5 minutes.
 // After an hour it settles into a nap all the same.
@@ -321,8 +321,8 @@ int wrapTiny(const char *s, int chars, char (*out)[64], int maxLines) {
 
 enum Act { THINK, TOOL, PACK, WAIT, NAP, DONE, FAIL, DARK, GONE };
 
-// Its last turn finished, answered or failed, and nobody has opened the
-// session since, nor tapped the pet: for an hour, until someone does
+// Its last turn finished, answered or failed, and nobody has seen it since,
+// nor tapped the pet: for an hour, until someone does
 bool unseen(const Pet &p, const Session &s) {
   bool ended = s.outcome == Outcome::Answer || s.outcome == Outcome::Error || s.outcome == Outcome::Refusal;
   return ended && s.endedAt && !s.seen && !s.stale && p.tappedEnd != s.endedAt && host.wall - s.endedAt < UNSEEN_MS &&

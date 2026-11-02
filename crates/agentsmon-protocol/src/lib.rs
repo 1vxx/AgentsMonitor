@@ -71,6 +71,9 @@ pub struct SessionMeta {
     /// Claude Desktop's title or its own generated one), when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The terminal it runs in, as `ps` names it (`ttys012`, `pts/3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<String>,
 }
 
 impl SessionMeta {
@@ -81,7 +84,7 @@ impl SessionMeta {
         macro_rules! take {
             ($($f:ident),*) => { $( if other.$f.is_some() { self.$f = other.$f.clone(); } )* };
         }
-        take!(cwd, project, model, permission_mode, agent_version, surface, interactive, transcript_path, title);
+        take!(cwd, project, model, permission_mode, agent_version, surface, interactive, transcript_path, title, tty);
         *self != before
     }
 
@@ -174,6 +177,13 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
     },
+    /// The person turned to this session (spoke to it, opened it) or, when
+    /// `leaving`, away from it: they have seen what it finished.
+    #[serde(rename = "attend")]
+    Attend {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        leaving: bool,
+    },
     /// The agent stopped to wait for the person.
     #[serde(rename = "attention")]
     Attention {
@@ -228,6 +238,7 @@ impl Event {
             Event::TurnEnd { .. } => "turn.end",
             Event::ToolStart { .. } => "tool.start",
             Event::ToolEnd { .. } => "tool.end",
+            Event::Attend { .. } => "attend",
             Event::Attention { .. } => "attention",
             Event::AttentionClear {} => "attention.clear",
             Event::CompactStart { .. } => "compact.start",
@@ -241,7 +252,7 @@ impl Event {
     /// Events too frequent or too empty to keep in the history. (Usage lives
     /// on in the session and the quota readings.)
     pub fn is_ephemeral(&self) -> bool {
-        matches!(self, Event::Heartbeat { .. } | Event::Usage { .. } | Event::Raw { .. })
+        matches!(self, Event::Heartbeat { .. } | Event::Usage { .. } | Event::Attend { .. } | Event::Raw { .. })
     }
 }
 
@@ -447,8 +458,7 @@ pub struct Session {
     pub last_turn: Option<LastTurn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt: Option<String>,
-    /// When the person last opened the session in the app it runs in
-    /// (Claude Desktop, the Codex app), as far as that app records it.
+    /// When the person last saw the session: what ended by then is not new.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seen_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -671,7 +681,7 @@ pub struct AttentionBrief {
 pub struct TurnBrief {
     pub outcome: TurnOutcome,
     pub ended_at: i64,
-    /// The person has opened the session since the turn ended.
+    /// The person has seen the turn since it ended.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub seen: bool,
 }

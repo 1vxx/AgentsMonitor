@@ -10,7 +10,7 @@
 //!   a file of its own under its root session's id.
 //! - **Threads.** `$CODEX_HOME/state_<n>.sqlite` has a row per thread, with the
 //!   name Codex shows and whether it is archived; a deleted thread leaves it.
-//!   Its `thread_read_receipts` say which threads the Codex app marks unread.
+//!   Its `thread_read_receipts` say which turns no Codex client acknowledged.
 //!
 //! Neither format is public: everything here is read-only and best effort,
 //! and what does not read as expected is skipped.

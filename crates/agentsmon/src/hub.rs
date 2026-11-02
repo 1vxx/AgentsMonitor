@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use agentsmon_protocol::{
-    AttentionKind, ContextUsage, Envelope, Event, EventRecord, PROTOCOL_VERSION, Quota, QuotaSample, RateWindow,
-    ServerInfo, Session, SessionMeta, Snapshot, Status, Summary, TokenTotals, UsageRecord,
+    AttentionKind, ContextUsage, Envelope, Event, EventRecord, LastTurn, PROTOCOL_VERSION, Quota, QuotaSample,
+    RateWindow, ServerInfo, Session, SessionMeta, Snapshot, Status, Summary, TokenTotals, UsageRecord,
 };
 use axum::extract::ws::Utf8Bytes;
 use parking_lot::Mutex;
@@ -79,12 +79,14 @@ pub struct Presence {
     pub session_id: String,
     pub ended: bool,
     pub transcript: Option<String>,
-    /// When its last turn ended, if the person has not opened it since.
+    /// When its last turn ended, if the person has not seen it since.
     pub unseen_since: Option<i64>,
     /// When its last turn began, when known.
     pub turn_began: Option<i64>,
     /// Neither at work nor waiting, and not gone quiet.
     pub idle: bool,
+    /// The terminal it runs in, if it does.
+    pub tty: Option<String>,
 }
 
 /// What a collector read about a session, for [`Hub::observe`].
@@ -125,6 +127,8 @@ struct State {
     /// Running sessions out of the live view (idle too long, or archived):
     /// only work brings one back. Heartbeats only keep it from going lost.
     hidden: HashMap<String, Hidden>,
+    /// The session the person last turned to.
+    attending: Option<String>,
 }
 
 struct Hidden {
@@ -142,6 +146,11 @@ fn wakes(event: &Event) -> bool {
             event,
             Event::Notice { .. } | Event::SessionEnd { .. } | Event::Attention { kind: AttentionKind::Idle, .. }
         )
+}
+
+/// The session's finished turn, if the person has not seen it.
+fn unseen(s: &Session) -> Option<&LastTurn> {
+    s.last_turn.as_ref().filter(|t| s.seen_at.is_none_or(|at| at < t.ended_at))
 }
 
 /// A running session at rest for longer than the live view keeps one.
@@ -180,6 +189,24 @@ impl State {
             self.sessions.insert(key.clone(), s);
         }
         self.sessions.get_mut(&key).expect("just inserted")
+    }
+
+    /// The person turned to a session or, `leaving`, away from one: what it
+    /// has finished by now is seen, and turning to it leaves the one before.
+    /// A turn still running then stays new when it ends. Returns the sessions
+    /// this changed.
+    fn attend(&mut self, key: &str, ts: i64, leaving: bool) -> Vec<String> {
+        let left = if leaving { None } else { self.attending.replace(key.to_string()).filter(|k| k != key) };
+        let mut seen = Vec::new();
+        for key in std::iter::once(key).chain(left.as_deref()) {
+            if let Some(s) = self.sessions.get_mut(key)
+                && unseen(s).is_some_and(|t| t.ended_at <= ts)
+            {
+                s.seen_at = Some(ts);
+                seen.push(key.to_string());
+            }
+        }
+        seen
     }
 
     /// Takes a session out of memory, and so out of the live view. A running
@@ -300,6 +327,7 @@ impl Hub {
                 pending_usage: HashMap::new(),
                 forgotten: HashMap::new(),
                 hidden,
+                attending: None,
             }),
             otlp_services: Mutex::new(BTreeSet::new()),
             tx,
@@ -424,6 +452,14 @@ impl Hub {
                 return;
             }
             st.forgotten.remove(&key);
+        }
+        if let Event::Attend { leaving } = event {
+            for seen in st.attend(&key, ts, leaving) {
+                if !changed.contains(&seen) {
+                    changed.push(seen);
+                }
+            }
+            return;
         }
         // Out of the live view: work brings it back, its end goes to the
         // history alone, and anything else only says it still runs.
@@ -785,19 +821,16 @@ impl Hub {
                 session_id: s.session_id.clone(),
                 ended: s.is_ended(),
                 transcript: s.meta.transcript_path.clone(),
-                unseen_since: s
-                    .last_turn
-                    .as_ref()
-                    .filter(|t| s.seen_at.is_none_or(|at| at < t.ended_at))
-                    .map(|t| t.ended_at),
+                unseen_since: unseen(s).map(|t| t.ended_at),
                 turn_began: s.last_turn.as_ref().and_then(|t| Some(t.ended_at - t.duration_ms? as i64)),
                 idle: s.status == Status::Idle && !s.stale,
+                tty: s.meta.tty.clone(),
             })
             .collect()
     }
 
-    /// When the person last saw each session, as the apps record it or a
-    /// display reports it; later times only. Returns how many changed.
+    /// When the person last saw each session, as an app says or a display
+    /// reports it; later times only. Returns how many changed.
     pub fn set_seen(&self, seen: &[(String, i64)]) -> usize {
         let mut st = self.state.lock();
         let mut out = Vec::new();
@@ -916,7 +949,7 @@ mod tests {
             env(r#"{"agent":"claude-code","type":"raw","payload":{"session_id":"r","hook_event_name":"UserPromptSubmit","prompt":"go"}}"#),
             env(r#"{"agent":"nobody","type":"raw","payload":{}}"#),
         ]);
-        assert_eq!((report.accepted, report.rejected.len()), (2, 1));
+        assert_eq!((report.accepted, report.rejected.len()), (3, 1));
         assert_eq!(hub.session("claude-code:r").unwrap().status, Status::Thinking);
         std::fs::remove_dir_all(dir).ok();
     }
@@ -1042,6 +1075,46 @@ mod tests {
         assert_eq!(hub.ingest_usage(vec![old]), 1);
         hub.ingest(vec![env(r#"{"agent":"claude-code","sid":"gone","type":"session.start"}"#)]);
         assert_eq!(hub.session("claude-code:gone").unwrap().stats.api_requests, 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn leaving_a_session_counts_as_having_seen_it() {
+        let (hub, dir) = hub("attend");
+        let now = now_ms();
+        let at = |sid: &str, ts: i64, rest: &str| {
+            env(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{ts},{rest}}}"#))
+        };
+        let attend = r#""type":"attend""#;
+        let leave = r#""type":"attend","leaving":true"#;
+        let start = r#""type":"turn.start""#;
+        let end = r#""type":"turn.end","outcome":"answer""#;
+        let seen = |sid: &str| hub.session(&format!("claude-code:{sid}")).and_then(|s| s.seen_at);
+
+        // Spoke to "a", read its answer, and opened "b" two seconds later
+        hub.ingest(vec![at("a", now - 60_000, attend), at("a", now - 60_000, start), at("a", now - 52_000, end)]);
+        assert_eq!(seen("a"), None);
+        hub.ingest(vec![at("b", now - 50_000, attend), at("b", now - 50_000, start)]);
+        assert_eq!(seen("a"), Some(now - 50_000));
+
+        // "b" was still at work when the person left it for "c": nothing says
+        // they saw what it finished after, and leaving "c" says nothing of it
+        hub.ingest(vec![at("c", now - 40_000, attend), at("c", now - 40_000, start), at("b", now - 30_000, end)]);
+        hub.ingest(vec![at("c", now - 20_000, end), at("d", now - 10_000, attend)]);
+        assert_eq!(seen("b"), None);
+        assert_eq!(seen("c"), Some(now - 10_000));
+
+        // Opening a session is seeing what it finished
+        hub.ingest(vec![at("b", now - 5_000, attend)]);
+        assert_eq!(seen("b"), Some(now - 5_000));
+
+        // A window closing on a session says the same, without moving on
+        hub.ingest(vec![at("e", now - 4_000, start), at("e", now - 3_000, end), at("e", now - 2_000, leave)]);
+        assert_eq!(seen("e"), Some(now - 2_000));
+
+        // A turn that ended after the person turned to the session stays new
+        hub.ingest(vec![at("f", now - 3_000, start), at("f", now - 2_000, end), at("f", now - 2_500, attend)]);
+        assert_eq!(seen("f"), None);
         std::fs::remove_dir_all(dir).ok();
     }
 

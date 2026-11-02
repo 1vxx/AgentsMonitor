@@ -32,7 +32,7 @@ Fields marked `?` are optional.
 
 | `type` | Fields |
 | --- | --- |
-| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `agent_version?` `surface?` `interactive?` `transcript_path?` `title?` (the session's short title; the daemon also reads Claude Code's from its transcript) |
+| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `agent_version?` `surface?` `interactive?` `transcript_path?` `title?` (the session's short title; the daemon also reads Claude Code's from its transcript) `tty?` (the terminal it runs in, as `ps` names it) |
 | `session.end` | `reason?` |
 | `heartbeat` | `busy?` and session metadata |
 | `prompt` | `preview?` |
@@ -40,6 +40,7 @@ Fields marked `?` are optional.
 | `turn.end` | `outcome` (`answer`, `aborted`, `refusal`, `error`) `turn_id?` `agent_id?` `duration_ms?` `usage?` (`input`, `output`, `cache_read`, `cache_write`, `model?`) `preview?` |
 | `tool.start` | `tool` `id?` `agent_id?` `subject?` |
 | `tool.end` | `tool` `id?` `agent_id?` `ok?` `duration_ms?` |
+| `attend` | `leaving?`: the person turned to this session (a prompt, a window opening it) or, with `leaving`, away from it. Not kept in the history |
 | `attention` | `kind` (`permission`, `input`, `idle`) `tool?` `subject?` `message?` |
 | `attention.clear` | — |
 | `compact.start` | `trigger?` |
@@ -65,7 +66,7 @@ Only the JSON encoding is accepted (`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`
 | --- | --- |
 | `GET /v1/health` | Name, version, protocol and uptime. Never requires a token |
 | `GET /v1/snapshot` | `{server, sessions, quotas, summary}` for the sessions in memory: running ones not idle for 2 h, and those ended in the last 30 min (both under `[sessions]` in the config) |
-| `GET /v1/summary` | The compact summary for display devices, its `ts` the time it is read. An item's `since` is when its status last changed, its `turn_since` when the turn in progress began (the prompt, or once the main loop has answered the first subagent still running), absent at rest. Its `last_turn.seen` says the person has seen that turn: opened the session in Claude Desktop since it ended, had it on screen there or in the Codex app (see the seen pass in ARCHITECTURE.md), or tapped it on a display |
+| `GET /v1/summary` | The compact summary for display devices, its `ts` the time it is read. An item's `since` is when its status last changed, its `turn_since` when the turn in progress began (the prompt, or once the main loop has answered the first subagent still running), absent at rest. Its `last_turn.seen` says the person has seen that turn: a client says so, they turned to the session or left it (see the seen pass in ARCHITECTURE.md), or they tapped it on a display |
 | `GET /v1/sessions` | `scope=live` (default) returns sessions in memory; `scope=all` pages through the store. Also `agent`, `limit` (default 100, max 1,000) and `offset` |
 | `GET /v1/sessions/{key}` | One session, from memory or the store |
 | `GET /v1/sessions/{key}/events` | The session's timeline, newest first. `before` (a `seq`) and `limit` (default 200, max 2,000) |
