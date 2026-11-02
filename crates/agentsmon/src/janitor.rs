@@ -16,6 +16,7 @@ use crate::hub::Hub;
 use crate::store::{self, Cutoffs, Op};
 use crate::titles::{self, Titles};
 use crate::util::now_ms;
+use crate::vscode::VsCode;
 
 const DAY_MS: i64 = 86_400_000;
 
@@ -97,6 +98,8 @@ pub struct Watch {
     desktop: Desktop,
     /// Codex's own records of its threads.
     codex: Threads,
+    /// The list of unread threads of Codex's VS Code extension.
+    vscode: VsCode,
     /// How far each live session's transcript has been read for its title.
     titles: Titles,
     /// Stored sessions already looked at for a title, found or not, while
@@ -112,6 +115,7 @@ impl Default for Watch {
             seen: HashSet::new(),
             desktop: Desktop::new(),
             codex: Threads::new(),
+            vscode: VsCode::new(),
             titles: Titles::default(),
             titles_tried: HashSet::new(),
             dev: PathBuf::from("/dev"),
@@ -207,9 +211,10 @@ fn touched(dev: &Path, tty: &str) -> Option<i64> {
 /// The seen pass, every few seconds: for the idle sessions whose last turn
 /// ended in the last hour and that the person has not seen since, whether
 /// what each runs in says they have: a Codex client acknowledged the turn in
-/// Codex's receipts, or the terminal took input after the turn ended. Sessions
-/// report the rest themselves, with `attend`. Nothing is read while there are
-/// none, which is most of the time.
+/// Codex's receipts, Codex's VS Code extension took the thread off its unread
+/// list, or the terminal took input after the turn ended. Sessions report the
+/// rest themselves, with `attend`. Nothing is read while there are none, which
+/// is most of the time.
 pub fn seen_pass(hub: &Hub) -> usize {
     use agentsmon_protocol::Session;
     use agentsmon_protocol::agents::CODEX;
@@ -222,16 +227,20 @@ pub fn seen_pass(hub: &Hub) -> usize {
     if unseen.is_empty() {
         return 0;
     }
-    let watch = hub.watch.lock();
+    let mut watch = hub.watch.lock();
+    let w = &mut *watch;
+    let codex: HashSet<String> = unseen.iter().filter(|p| p.agent == CODEX).map(|p| p.session_id.clone()).collect();
+    let mut seen: Vec<(String, i64)> =
+        w.vscode.opened(&codex).iter().map(|id| (Session::key_for(CODEX, id), now)).collect();
+
     let turns: Vec<(String, i64)> =
         unseen.iter().filter(|p| p.agent == CODEX).filter_map(|p| Some((p.session_id.clone(), p.turn_began?))).collect();
-    let mut seen: Vec<(String, i64)> = if turns.is_empty() {
-        Vec::new()
-    } else {
-        watch.codex.read(&turns).iter().map(|id| (Session::key_for(CODEX, id), now)).collect()
-    };
+    if !turns.is_empty() {
+        seen.extend(w.codex.read(&turns).iter().map(|id| (Session::key_for(CODEX, id), now)));
+    }
+
     seen.extend(unseen.iter().filter_map(|p| {
-        let at = touched(&watch.dev, p.tty.as_deref()?)?;
+        let at = touched(&w.dev, p.tty.as_deref()?)?;
         (at >= p.unseen_since? + TTY_LAG_MS).then(|| (p.key.clone(), at))
     }));
     drop(watch);
@@ -433,7 +442,7 @@ mod tests {
         for tty in ["ttys001", "ttys002", "ttys003"] {
             terminal(&dir, tty, now);
         }
-        *hub.watch.lock() = Watch { dev: dir.clone(), ..Watch::default() };
+        *hub.watch.lock() = Watch { dev: dir.clone(), vscode: VsCode::at(vec![dir.join("none")]), ..Watch::default() };
 
         let event = |sid: &str, ts: i64, rest: &str| {
             serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"claude-code","sid":"{sid}","ts":{ts},{rest}}}"#)).unwrap()
@@ -472,7 +481,7 @@ mod tests {
         let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
         let now = now_ms();
         let ended = now - 60_000;
-        *hub.watch.lock() = Watch { dev: dir.clone(), ..Watch::default() };
+        *hub.watch.lock() = Watch { dev: dir.clone(), vscode: VsCode::at(vec![dir.join("none")]), ..Watch::default() };
         let event = |ts: i64, rest: &str| {
             serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"claude-code","sid":"s","ts":{ts},{rest}}}"#)).unwrap()
         };
@@ -500,14 +509,14 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_a_codex_client_acknowledged_is_seen() {
+    fn what_codex_says_is_seen() {
         let dir = std::env::temp_dir().join(format!("agentsmon-receipts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let hub = Hub::new(crate::store::Store::open(&dir.join("t.db")).unwrap(), crate::config::LiveView::default(), Retention::default());
         let now = now_ms();
         let (began, ended) = (now - 90_000, now - 60_000);
-        // A Codex client acknowledged "read" through its last turn, "unread" not
+        // A Codex client acknowledged "read" through its last turn, the others not
         let codex = dir.join("codex");
         std::fs::create_dir_all(&codex).unwrap();
         let hex = format!("{began:012x}");
@@ -519,20 +528,42 @@ mod tests {
                  INSERT INTO thread_read_receipts VALUES ('read', NULL, 'r1', '{turn}'), ('unread', '{turn}', 'r2', '{turn}');"
             ))
             .unwrap();
-        *hub.watch.lock() = Watch { codex: Threads::at(codex), dev: dir.clone(), ..Watch::default() };
+        // Its VS Code extension lists "opened" and "unread" as unread
+        let state = dir.join("editors/Code/User/globalStorage");
+        std::fs::create_dir_all(&state).unwrap();
+        let db = state.join("state.vscdb");
+        let write = |ids: &str, at: std::time::SystemTime| {
+            let c = rusqlite::Connection::open(&db).unwrap();
+            c.execute_batch("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)").unwrap();
+            let value = format!(r#"{{"persisted-atom-state":{{"unread-thread-ids-by-host-v1":{{"local":[{ids}]}}}}}}"#);
+            c.execute("INSERT INTO ItemTable VALUES ('openai.chatgpt', ?1)", [value.as_bytes()]).unwrap();
+            drop(c);
+            std::fs::File::options().write(true).open(&db).unwrap().set_modified(at).unwrap();
+        };
+        let at = std::time::SystemTime::now();
+        write(r#""opened","unread""#, at);
+        *hub.watch.lock() =
+            Watch { vscode: VsCode::at(vec![dir.join("editors")]), codex: Threads::at(codex), dev: dir.clone(), ..Watch::default() };
 
         let event = |sid: &str, ts: i64, rest: &str| {
             serde_json::from_str::<agentsmon_protocol::Envelope>(&format!(r#"{{"agent":"codex","sid":"{sid}","ts":{ts},{rest}}}"#)).unwrap()
         };
         let mut batch = Vec::new();
-        for sid in ["read", "unread"] {
+        for sid in ["read", "unread", "opened", "quiet"] {
             batch.push(event(sid, began, r#""type":"turn.start""#));
             batch.push(event(sid, ended, r#""type":"turn.end","outcome":"answer""#));
         }
         hub.ingest(batch);
-        assert_eq!(seen_pass(&hub), 1);
-        assert!(hub.session("codex:read").and_then(|s| s.seen_at).is_some());
-        assert_eq!(hub.session("codex:unread").and_then(|s| s.seen_at), None);
+        let seen = |sid: &str| hub.session(&format!("codex:{sid}")).and_then(|s| s.seen_at).is_some();
+        let all = ["read", "unread", "opened", "quiet"];
+        let seen_now = || all.iter().filter(|sid| seen(sid)).copied().collect::<Vec<_>>();
+
+        // A receipt says so outright; the list only says something by changing
+        seen_pass(&hub);
+        assert_eq!(seen_now(), ["read"]);
+        write(r#""unread""#, at + Duration::from_secs(1));
+        seen_pass(&hub);
+        assert_eq!(seen_now(), ["read", "opened"]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -18,6 +18,7 @@ mod sys;
 mod tail;
 mod titles;
 mod util;
+mod vscode;
 
 use std::collections::HashSet;
 use std::io::Read;
