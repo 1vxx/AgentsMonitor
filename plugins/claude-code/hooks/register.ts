@@ -53,10 +53,12 @@ let waiting: string | undefined
 let ended = false
 let heartbeat: { cancel: () => void } | undefined
 // What is in flight, so a heartbeat can say whether anything is: the main
-// turn, subagents (background ones outlive the main turn) and tool calls
+// turn, subagents (background ones outlive the main turn), tool calls and
+// compactions (a /compact runs between turns)
 let mainTurn = false
 const agents = new Set<string>()
 let tools = 0
+let compactions = 0
 // Whether a heartbeat still owes saying that no work runs here. One session can
 // be open in two windows, a process each: one that did nothing has nothing to
 // say about work, and its `false` would end the turn running in the other. A
@@ -68,7 +70,7 @@ let sending: Promise<void> | undefined
 let scheduled = false
 let retryMs = 0
 
-const busy = () => mainTurn || agents.size > 0 || tools > 0
+const busy = () => mainTurn || agents.size > 0 || tools > 0 || compactions > 0
 const text = (value: unknown, max: number) => (withText ? preview(value, max) : undefined)
 
 const setMeta = (next: Meta) => {
@@ -369,14 +371,19 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch((_$, e, next) => next(e))
 
-  on('classic.PreCompact', ($, e, next) => {
+  // Wraps a compaction to see it start and end. A precompute, run ahead of
+  // time while the session rests, changes nothing yet: it is not one. The
+  // classic PreCompact calls it `auto` too, and no PostCompact follows it
+  on('session.compact', async ($, e, next) => {
+    if (e.trigger === 'precompute') return next(e)
     emit($, { type: 'compact.start', trigger: e.trigger })
-    return next(e)
-  }).catch((_$, e, next) => next(e))
-
-  on('classic.PostCompact', ($, e, next) => {
-    emit($, { type: 'compact.end' })
-    return next(e)
+    compactions++
+    try {
+      return await next(e)
+    } finally {
+      compactions--
+      emit($, { type: 'compact.end' })
+    }
   }).catch((_$, e, next) => next(e))
 
   // Context fill, cost and the account's rate-limit windows, after each turn

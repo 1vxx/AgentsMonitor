@@ -3,9 +3,12 @@ import { expect, mock, test } from 'claude-code/testing'
 
 type Sent = { type: string; sid?: string; [field: string]: unknown }
 
+// What a compaction runs over
+const messages = [{ role: 'user' as const, text: 'fix the bug', toolUses: [] }]
+
 // Stands in for the engine beneath the plugin and for the daemon: answers
 // what the plugin asks of the session and records every batch it posts
-const engine = (on: On, options: { down?: boolean; tty?: string } = {}) => {
+const engine = (on: On, options: { down?: boolean; tty?: string; summarize?: () => Promise<void> } = {}) => {
   const posts: { socketPath?: string; events: Sent[] }[] = []
   const state = { down: options.down === true }
   on('session.id', () => ({ value: 'sess-1' }))
@@ -40,6 +43,11 @@ const engine = (on: On, options: { down?: boolean; tty?: string } = {}) => {
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: `${options.tty ?? 'ttys012'}\n`, stderr: '' } }))
   on('classic.PermissionRequest', () => ({}))
+  on('session.compact', async (_$, e) => {
+    // The summarizer takes a while
+    await options.summarize?.()
+    return { messages: e.messages }
+  })
   const sent = () => posts.flatMap(p => p.events)
   return { posts, sent, state }
 }
@@ -240,6 +248,41 @@ test('a turn between two heartbeats is still said to be over, once', async ($, o
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(40_000)
   expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([false, undefined])
+})
+
+test('a /compact between turns keeps the session busy until it is done', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on, { summarize: () => clock.sleep(30_000) })
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const compacting = $.session.compact({ trigger: 'manual', messages })
+  await clock.advance(20_000)
+  expect(sent().filter(e => e.type.startsWith('compact')).map(e => e.type)).toEqual(['compact.start'])
+  expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([true])
+
+  await clock.advance(10_000)
+  await compacting
+  await clock.advance(10_000)
+  expect(sent().filter(e => e.type.startsWith('compact'))).toMatchObject([
+    { type: 'compact.start', trigger: 'manual' },
+    { type: 'compact.end' },
+  ])
+  expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([true, false])
+})
+
+test('a compaction worked out ahead of time is no compaction', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  // Claude Code prepares one while the session rests, and installs nothing
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await $.session.compact({ trigger: 'precompute', messages })
+  await clock.settle()
+  expect(sent().some(e => e.type.startsWith('compact'))).toBe(false)
 })
 
 test('events wait while the daemon is away and go out once it is back', async ($, on) => {

@@ -73,7 +73,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | `tool.call` (wrapping `next`) | `tool.start`, `tool.end`; `AskUserQuestion` also raises `attention` (input) |
 | `classic.PermissionRequest` | `attention` (permission) |
 | `classic.Notification` | `idle_prompt` → `attention` (idle); `elicitation_dialog` → `attention` (input) |
-| `classic.PreCompact`, `classic.PostCompact` | `compact.start`, `compact.end` |
+| `session.compact` (wrapping `next`) | `compact.start`, `compact.end`; none for a `precompute`, which Claude Code works out ahead of time while the session rests and which changes nothing |
 | `session.measure` | `usage`: context, cost, five-hour and seven-day windows |
 | `classic.UserPromptSubmit` | A heartbeat when the permission mode changed |
 | `session.attach`, `session.detach` | `attend`, `attend` with `leaving`; an attach also announces a session that was waiting to be used |
