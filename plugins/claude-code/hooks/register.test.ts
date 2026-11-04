@@ -8,7 +8,16 @@ const messages = [{ role: 'user' as const, text: 'fix the bug', toolUses: [] }]
 
 // Stands in for the engine beneath the plugin and for the daemon: answers
 // what the plugin asks of the session and records every batch it posts
-const engine = (on: On, options: { down?: boolean; tty?: string; summarize?: () => Promise<void> } = {}) => {
+type Options = {
+  down?: boolean
+  tty?: string
+  summarize?: () => Promise<void>
+  // What the engine does with a prompt that enters: its hooks, then its turn
+  enter?: (text: string) => Promise<unknown>
+  drop?: boolean
+}
+
+const engine = (on: On, options: Options = {}) => {
   const posts: { socketPath?: string; events: Sent[] }[] = []
   const state = { down: options.down === true }
   on('session.id', () => ({ value: 'sess-1' }))
@@ -40,7 +49,11 @@ const engine = (on: On, options: { down?: boolean; tty?: string; summarize?: () 
   on('classic.SessionStart', () => ({}))
   on('session.attach', (_$, e) => ({ clientId: e.clientId }))
   on('session.detach', (_$, e) => ({ clientId: e.clientId }))
-  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('prompt.submit', async (_$, e) => {
+    if (options.drop) return { drop: 'blocked by a hook' }
+    await options.enter?.(e.text)
+    return { text: e.text }
+  })
   on('process.run', () => ({ value: { exitCode: 0, stdout: `${options.tty ?? 'ttys012'}\n`, stderr: '' } }))
   on('classic.PermissionRequest', () => ({}))
   on('session.compact', async (_$, e) => {
@@ -189,6 +202,58 @@ test('a script is nobody turning to the session', async ($, on) => {
   await $.turn.start({ text: 'go', turnId: 't1' })
   await clock.settle()
   expect(sent().some(e => e.type === 'attend')).toBe(false)
+})
+
+test('a turn shows from the moment its prompt is sent, not once its hooks are done', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  mock.env(on, {})
+  // A UserPromptSubmit hook that takes 30 s, then the turn
+  const enter = async (text: string) => {
+    await clock.sleep(30_000)
+    await $.turn.start({ text, turnId: 't1' })
+  }
+  const { sent } = engine(on, { enter })
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  const sending = $.prompt.submit(submit('composer'))
+  await clock.settle()
+  expect(sent().filter(e => e.type === 'prompt' || e.type === 'turn.start')).toMatchObject([
+    { type: 'prompt', preview: 'go' },
+    { type: 'turn.start', preview: 'go' },
+  ])
+
+  await clock.advance(30_000)
+  await sending
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(sent().filter(e => e.type === 'turn.start').length).toBe(1)
+  expect(sent().filter(e => e.type === 'heartbeat').map(b => b.busy)).toEqual([true])
+  expect(sent().at(-1)?.type).toBe('turn.end')
+})
+
+test('a prompt a hook drops takes back the turn it showed', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on, { drop: true })
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await $.prompt.submit(submit('composer'))
+  await clock.settle()
+  const after = sent().slice(sent().findIndex(e => e.type === 'turn.start'))
+  expect(after).toMatchObject([{ type: 'turn.start' }, { type: 'heartbeat', busy: false }])
+})
+
+test('a prompt typed over a running turn joins it', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, {})
+  const { sent } = engine(on)
+
+  await $.session.start({ cwd: '/work/demo', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'one', turnId: 't1' })
+  await $.prompt.submit({ ...submit('composer'), turnId: 't1' })
+  await clock.settle()
+  expect(sent().filter(e => e.type === 'turn.start').length).toBe(1)
+  expect(sent().some(e => e.type === 'heartbeat')).toBe(false)
 })
 
 test('a session at a terminal says which one', async ($, on) => {

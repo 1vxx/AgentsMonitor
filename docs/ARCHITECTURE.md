@@ -69,7 +69,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | --- | --- |
 | `session.start`, `classic.SessionStart` | `session.start`, sent once; the latter adds `source`, the session id, permission mode and transcript path. A terminal session also sends `attend` |
 | `session.end` | `session.end`, sent within the exit budget. After `/clear` the plugin continues under the new id |
-| `turn.start`, `turn.complete` | `prompt`, `turn.start`, `turn.end` with subagent id, duration, token usage and answer preview |
+| `turn.start`, `turn.complete` | `prompt`, `turn.start`, `turn.end` with subagent id, duration, token usage and answer preview. A turn whose prompt was sent to a resting session has shown since then (`prompt.submit`) |
 | `tool.call` (wrapping `next`) | `tool.start`, `tool.end`; `AskUserQuestion` also raises `attention` (input) |
 | `classic.PermissionRequest` | `attention` (permission) |
 | `classic.Notification` | `idle_prompt` → `attention` (idle); `elicitation_dialog` → `attention` (input) |
@@ -77,7 +77,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | `session.measure` | `usage`: context, cost, five-hour and seven-day windows |
 | `classic.UserPromptSubmit` | A heartbeat when the permission mode changed |
 | `session.attach`, `session.detach` | `attend`, `attend` with `leaving`; an attach also announces a session that was waiting to be used |
-| `prompt.submit` | `attend`, for a person's prompt: `composer` or `bridge`, or `sdk` unless the entry point is a script's (`sdk-*`) |
+| `prompt.submit` | `attend`, for a person's prompt: `composer` or `bridge`, or `sdk` unless the entry point is a script's (`sdk-*`). Sent to a resting session, a prompt that is no slash command also sends `prompt` and `turn.start` at once: the engine starts the turn only after the UserPromptSubmit hooks, which can take seconds. A prompt dropped, or that starts no turn, is followed by a heartbeat with `busy: false` |
 
 **Announcing.** Interactive (terminal) sessions announce at launch. Non-interactive ones (Claude Desktop, SDK, `-p`) announce on first use: the first turn, the first tool call, or a surface attaching. Claude Desktop keeps a spare session warm for the next new session; until it is used, it never appears in the monitor. Metadata such as the project name, and a terminal session's tty, is read at announce time, after the spare has been claimed.
 

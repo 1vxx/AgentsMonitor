@@ -59,6 +59,9 @@ let mainTurn = false
 const agents = new Set<string>()
 let tools = 0
 let compactions = 0
+// A prompt sent to a resting session whose turn the monitor shows already,
+// before the engine starts it
+let submitted = false
 // Whether a heartbeat still owes saying that no work runs here. One session can
 // be open in two windows, a process each: one that did nothing has nothing to
 // say about work, and its `false` would end the turn running in the other. A
@@ -70,8 +73,14 @@ let sending: Promise<void> | undefined
 let scheduled = false
 let retryMs = 0
 
-const busy = () => mainTurn || agents.size > 0 || tools > 0 || compactions > 0
+const busy = () => mainTurn || submitted || agents.size > 0 || tools > 0 || compactions > 0
 const text = (value: unknown, max: number) => (withText ? preview(value, max) : undefined)
+
+const startTurn = ($: EngineInterface, said: string, turnId?: string) => {
+  const prompt = text(said, PROMPT_CHARS)
+  if (said !== '') emit($, { type: 'prompt', preview: prompt })
+  emit($, { type: 'turn.start', turn_id: turnId, preview: prompt })
+}
 
 const setMeta = (next: Meta) => {
   let changed = false
@@ -218,6 +227,7 @@ const endSession = async ($: EngineInterface, endedId: string, reason: string) =
   }
   queue.push({ agent: AGENT, sid: endedId, ts: Date.now(), type: 'session.end', reason })
   mainTurn = false
+  submitted = false
   agents.clear()
   if (reason === 'clear') {
     // The process goes on under a new id, which SessionStart brings
@@ -275,7 +285,24 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const scripted = e.origin.kind === 'sdk' && ((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '').startsWith('sdk-')
     if (PERSON_ORIGINS.has(e.origin.kind) || (e.origin.kind === 'sdk' && !scripted)) emit($, { type: 'attend' })
-    return next(e)
+    // Sent to a resting session, a prompt starts a turn, but the engine starts
+    // it only once the prompt's UserPromptSubmit hooks are done, which can take
+    // seconds: the turn shows from the moment it is sent. One typed over a
+    // running turn joins that turn; a slash command may start none
+    if (e.turnId !== undefined || e.command !== undefined || mainTurn || submitted) return next(e)
+    worked = true
+    submitted = true
+    startTurn($, e.text)
+    try {
+      return await next(e)
+    } finally {
+      // The turn has started by now, unless the prompt was dropped or started
+      // none: then nothing runs after all
+      if (submitted) {
+        submitted = false
+        emit($, heartbeatEvent())
+      }
+    }
   }).catch((_$, e, next) => next(e))
 
   // The permission mode can change any time (shift+tab): pick it up per prompt
@@ -288,9 +315,9 @@ export const register: Register = (on, options) => {
     worked = true
     if (e.agentId === undefined) {
       mainTurn = true
-      const prompt = text(e.text, PROMPT_CHARS)
-      if (e.text !== '') emit($, { type: 'prompt', preview: prompt })
-      emit($, { type: 'turn.start', turn_id: e.turnId, preview: prompt })
+      // Shown since its prompt was sent
+      if (submitted) submitted = false
+      else startTurn($, e.text, e.turnId)
     } else {
       agents.add(e.agentId)
       emit($, { type: 'turn.start', turn_id: e.turnId, agent_id: e.agentId, preview: text(e.text, PROMPT_CHARS) })
