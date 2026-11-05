@@ -57,6 +57,10 @@ pub struct SessionMeta {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    /// An automatic reviewer, not the person, answers the session's approval
+    /// requests (Codex's auto-review). Absent, the person does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_review: Option<bool>,
     /// Version of the agent product.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
@@ -84,7 +88,7 @@ impl SessionMeta {
         macro_rules! take {
             ($($f:ident),*) => { $( if other.$f.is_some() { self.$f = other.$f.clone(); } )* };
         }
-        take!(cwd, project, model, permission_mode, agent_version, surface, interactive, transcript_path, title, tty);
+        take!(cwd, project, model, permission_mode, auto_review, agent_version, surface, interactive, transcript_path, title, tty);
         *self != before
     }
 
@@ -327,6 +331,9 @@ pub enum Status {
     Compacting,
     Thinking,
     Tool,
+    /// A tool call waits for an automatic reviewer's approval: working, with
+    /// nothing asked of the person.
+    Reviewing,
     WaitingInput,
     WaitingPermission,
 }
@@ -336,7 +343,7 @@ impl Status {
         matches!(self, Status::WaitingInput | Status::WaitingPermission)
     }
     pub fn is_working(self) -> bool {
-        matches!(self, Status::Thinking | Status::Tool | Status::Compacting)
+        matches!(self, Status::Thinking | Status::Tool | Status::Reviewing | Status::Compacting)
     }
     pub fn as_str(self) -> &'static str {
         match self {
@@ -345,6 +352,7 @@ impl Status {
             Status::Compacting => "compacting",
             Status::Thinking => "thinking",
             Status::Tool => "tool",
+            Status::Reviewing => "reviewing",
             Status::WaitingInput => "waiting_input",
             Status::WaitingPermission => "waiting_permission",
         }
@@ -370,6 +378,20 @@ pub struct ActiveTool {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     pub started_at: i64,
+    /// The call waits for approval. Agents do not say when it is given, so
+    /// this holds until the call ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<Approval>,
+}
+
+/// A tool call's request for approval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Approval {
+    /// When it was asked for.
+    pub since: i64,
+    /// An automatic reviewer answers it, not the person.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reviewer: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -622,6 +644,8 @@ pub struct StatusCounts {
     pub idle: u32,
     pub thinking: u32,
     pub tool: u32,
+    #[serde(default)]
+    pub reviewing: u32,
     pub compacting: u32,
     pub waiting: u32,
     pub stale: u32,

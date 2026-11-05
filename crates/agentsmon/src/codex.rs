@@ -252,6 +252,10 @@ impl Rollout {
                 if let Some(m) = p.get("model").and_then(Value::as_str) {
                     self.model = Some(m.to_string());
                 }
+                // `guardian_subagent` is auto-review's earlier name.
+                if let Some(r) = p.get("approvals_reviewer").and_then(Value::as_str) {
+                    seen.auto_review = Some(matches!(r, "auto_review" | "guardian_subagent"));
+                }
             }
             Some("token_usage_record") if fresh => {
                 if let Some(u) = self.usage_of(p, ts) {
@@ -306,6 +310,8 @@ struct Seen {
     ts: i64,
     context: Option<ContextUsage>,
     rate_limits: Option<Vec<RateWindow>>,
+    /// Whether Codex's auto-review answers approvals, as the latest turn set.
+    auto_review: Option<bool>,
 }
 
 impl Seen {
@@ -314,7 +320,7 @@ impl Seen {
     fn into_observed(self, t: &Thread) -> Option<(i64, Observed)> {
         let main = t.source == "main";
         let observed = Observed {
-            meta: main.then(|| t.meta.clone()),
+            meta: main.then(|| SessionMeta { auto_review: self.auto_review, ..t.meta.clone() }),
             context: self.context.filter(|_| main),
             rate_limits: self.rate_limits,
         };
@@ -578,7 +584,7 @@ mod tests {
         std::fs::create_dir_all(&day).unwrap();
         let main = day.join("rollout-2026-10-27T15-48-07-s1.jsonl");
         append(&main, &meta("s1", "s1", json!("vscode")));
-        append(&main, &line("2026-10-27T07:48:08.000Z", "turn_context", json!({"model": "gpt-6.1-sol"})));
+        append(&main, &line("2026-10-27T07:48:08.000Z", "turn_context", json!({"model": "gpt-6.1-sol", "approvals_reviewer": "auto_review"})));
         append(&main, &request("resp_1", "s1", "s1", 30_617, 23_296));
         append(&main, &count(1.0));
         // A message that only mentions a marker is parsed and left alone.
@@ -600,7 +606,8 @@ mod tests {
         let windows = seen.rate_limits.as_ref().unwrap();
         assert_eq!((windows[0].kind.as_str(), windows[0].resets_at.as_deref()), ("five_hour", Some("2026-10-27T12:37:49Z")));
         assert_eq!(windows[1].kind, "seven_day");
-        assert_eq!(seen.meta.as_ref().and_then(|m| m.surface.as_deref()), Some("desktop"));
+        let learned = seen.meta.as_ref().unwrap();
+        assert_eq!((learned.surface.as_deref(), learned.auto_review), (Some("desktop"), Some(true)));
         let (name, offset, head) = h.cursors[0].clone();
         let head = head.as_deref().and_then(Head::decode);
         assert!(head.is_some());
@@ -626,8 +633,11 @@ mod tests {
         let mut again = Rollouts::at(root.clone());
         let len = std::fs::metadata(&main).unwrap().len();
         again.counted = Some(HashMap::from([(name.clone(), (offset, head))]));
+        append(&main, &line("2026-10-27T08:01:00.000Z", "turn_context", json!({"approvals_reviewer": "user"})));
         append(&main, &request("resp_4", "s1", "s1", 50, 0));
         let h = again.scan();
+        let (_, _, seen) = h.seen.iter().find(|(_, _, s)| s.meta.is_some()).unwrap();
+        assert_eq!(seen.meta.as_ref().unwrap().auto_review, Some(false));
         let mut ids: Vec<&str> = h.usage.iter().map(|u| u.request_id.as_str()).collect();
         ids.sort();
         assert_eq!(ids, vec!["resp_2", "resp_3", "resp_4"]);

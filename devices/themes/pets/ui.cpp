@@ -319,7 +319,7 @@ int wrapTiny(const char *s, int chars, char (*out)[64], int maxLines) {
 
 // ---------- What a pet does ----------
 
-enum Act { THINK, TOOL, PACK, WAIT, NAP, DONE, FAIL, DARK, GONE };
+enum Act { THINK, TOOL, REVIEW, PACK, WAIT, NAP, DONE, FAIL, DARK, GONE };
 
 // Its last turn finished, answered or failed, and nobody has seen it since,
 // nor tapped the pet: for an hour, until someone does
@@ -336,6 +336,7 @@ Act actOf(const Pet &p, const Session *s) {
   switch (s->status) {
     case Status::Thinking: return THINK;
     case Status::Tool: return TOOL;
+    case Status::Reviewing: return REVIEW;
     case Status::Compacting: return PACK;
     default: break;
   }
@@ -351,6 +352,7 @@ uint16_t actColor(Act a) {
   switch (a) {
     case THINK:
     case TOOL:
+    case REVIEW:
     case PACK: return teal;
     case WAIT: return amber;
     case DONE: return green;
@@ -387,6 +389,17 @@ int stateLines(const Session &s, char (*out)[64], bool fresh = false) {
       }
       snprintf(out[n++], 64, "RUNNING %s", tool);
       snprintf(out[n++], 64, "%s", tool);
+      return n;
+    }
+    case Status::Reviewing: {
+      toolName(s.tool, tool, sizeof tool);
+      int n = 0;
+      if (s.turnSince) {
+        duration(host.wall - s.turnSince, t, sizeof t);
+        snprintf(out[n++], 64, "AUTO-REVIEWING %s %s", tool, t);
+      }
+      snprintf(out[n++], 64, "AUTO-REVIEWING %s", tool);
+      snprintf(out[n++], 64, "AUTO-REVIEWING");
       return n;
     }
     case Status::Thinking:
@@ -831,6 +844,7 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
   switch (act) {
     case THINK: dy = (int(t * 1.6f) & 1) * u; break;
     case TOOL: dy = (int(t * 7) & 1) * u; break;
+    case REVIEW: eyes = OPEN; break;  // holds still, watching its call be looked over
     case PACK: squash = 0.72f + 0.28f * fabsf(cosf(t * 2.5f)); break;
     case WAIT: dy = -iround(fabsf(sinf(t * 5)) * 2 * u); eyes = OPEN; break;
     case DONE: {
@@ -916,6 +930,9 @@ void drawPet(const Pet &p, const Session *s, Pose at, float a, bool press, int w
         float ang = -2.0f + q * 1.0f, r = (b.x1 - b.x0) / 2.f + ph * 5 * u;
         block(iround((b.x0 + b.x1) / 2.f + cosf(ang) * r), iround(b.head + 3 * u + sinf(ang) * r), u, teal, (1 - ph) * a);
       }
+      break;
+    case REVIEW:  // three dots by its head, breathing together, as THINK's never do
+      for (int q = 0; q < 3; q++) block(b.x1 + u + q * 2 * u, side + u, u, teal, (0.45f + 0.4f * sinf(t * 2.2f)) * a);
       break;
     case WAIT: board::tiny("!", float(b.x1 + u), side, amber, (0.6f + 0.4f * sinf(t * 8)) * a, u); break;
     case DONE: {
@@ -1128,6 +1145,7 @@ void allText(float a) {
     switch (act) {
       case THINK: snprintf(name, sizeof name, "THINK"); break;
       case TOOL: toolName(s->tool, name, sizeof name); break;
+      case REVIEW: snprintf(name, sizeof name, "REVIEW"); break;
       case PACK: snprintf(name, sizeof name, "COMPACT"); break;
       case WAIT: snprintf(name, sizeof name, s->status == Status::WaitingInput ? "ASKING" : "APPROVE"); break;
       case DONE: snprintf(name, sizeof name, "DONE!"); break;

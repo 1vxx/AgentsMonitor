@@ -96,6 +96,7 @@ void stateOf(const Session &s, char *out, size_t n, RGB &color) {
       break;
     case Status::WaitingInput: snprintf(out, n, "HAS A QUESTION"), color = MOOD_COLORS[int(Mood::Attention)]; break;
     case Status::Tool: snprintf(out, n, "RUNNING %s", s.tool), color = MOOD_COLORS[int(Mood::Working)]; break;
+    case Status::Reviewing: snprintf(out, n, "AUTO-REVIEWING %s", s.tool), color = MOOD_COLORS[int(Mood::Working)]; break;
     case Status::Thinking: snprintf(out, n, "THINKING"), color = MOOD_COLORS[int(Mood::Working)]; break;
     case Status::Compacting: snprintf(out, n, "COMPACTING"), color = MOOD_COLORS[int(Mood::Working)]; break;
     case Status::Ended: snprintf(out, n, "ENDED"), color = DIM; break;

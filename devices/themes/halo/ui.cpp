@@ -269,6 +269,15 @@ int stateLines(const Session &s, char (*out)[96]) {
       snprintf(out[0], 96, "RUNNING %s", tool);
       snprintf(out[1], 96, "%s", tool);
       return 2;
+    case Status::Reviewing:
+      toolName(s.tool, tool, sizeof tool);
+      if (!tool[0]) {
+        snprintf(out[0], 96, "AUTO-REVIEWING");
+        return 1;
+      }
+      snprintf(out[0], 96, "AUTO-REVIEWING %s", tool);
+      snprintf(out[1], 96, "AUTO-REVIEWING");
+      return 2;
     case Status::Thinking: snprintf(out[0], 96, "THINKING"); return 1;
     case Status::Compacting: snprintf(out[0], 96, "COMPACTING"); return 1;
     default: break;
@@ -840,7 +849,8 @@ void listLayer(float a, float e) {
       toolName(s.tool, word, sizeof word);
       text::fit(LABEL, 3, word, 84, side, sizeof side);
     } else if (model::working(s.status)) {
-      snprintf(side, sizeof side, "%s", s.status == Status::Compacting ? "PACK" : "THINK");
+      const char *what = s.status == Status::Compacting ? "PACK" : s.status == Status::Reviewing ? "REVIEW" : "THINK";
+      snprintf(side, sizeof side, "%s", what);
     } else {
       age(host.wall - (s.endedAt ? s.endedAt : s.since), side, sizeof side, false);
     }

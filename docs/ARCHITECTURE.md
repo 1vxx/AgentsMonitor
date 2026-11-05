@@ -24,7 +24,7 @@ Codex rollout logs ◀─ read ─────    codex collector ────�
 | Janitor | `src/janitor.rs` | Follows deletion and archiving in Claude, applies retention, compacts the database |
 | Claude | `src/claude.rs` | Reads token counts from Claude Code's transcripts, and the account's usage limits from the reading Claude Code keeps, fetching it again with `claude -p /usage` while Claude Code is at work |
 | OTLP | `src/otlp.rs` | Reads token counts from OTLP/HTTP JSON log exports (optional) |
-| Codex | `src/codex.rs` | Reads token counts, context and rate limits from Codex's rollout logs, and titles, archiving and deletion from its thread records |
+| Codex | `src/codex.rs` | Reads token counts, context, rate limits and who answers approvals from Codex's rollout logs, and titles, archiving and deletion from its thread records |
 | Tail | `src/tail.rs` | Reads on in a log file another program appends to, line by line through a 64 KB buffer, and knows it again by its first bytes, so a replaced file is read from the top. Keeps folder listings until a folder's modification time moves |
 | Desktop | `src/desktop.rs` | Reads Claude Desktop's archive state |
 | Titles | `src/titles.rs` | Reads the short title Claude Code gives each session from its transcript |
@@ -43,10 +43,12 @@ Every agent maps onto one vocabulary, specified in [PROTOCOL.md](PROTOCOL.md):
 
 Events record only what is in flight: the main turn, running tools, subagents, a pending approval or question, a compaction. `derive_status` reads the status from those facts, in this order of precedence:
 
-`ended` > `waiting_permission` > `waiting_input` > `compacting` > `tool` > `thinking` > `idle`
+`ended` > `waiting_permission` > `waiting_input` > `compacting` > `reviewing` > `tool` > `thinking` > `idle`
 
 - The end of a main turn clears the main loop's tools and pending items. Background subagents remain until their own `turn.end`, or until a heartbeat reports `busy: false`.
-- A pending approval clears when its tool ends. A parallel tool ending does not clear it.
+- An approval request belongs to the tool call it asks about. Neither Claude Code's nor Codex's names the call, so it is the newest call of its tool not waiting already, the one with its subject first. The session waits for approval while any call does and shows the one that has waited longest; a call ending settles its own request only, and the next one waiting takes over. Agents say nothing when an approval is given, so a call waits until it ends: an approved long command shows `waiting_permission` until it finishes, a denied one clears at once. A request with no open call of its tool waits for the session as a whole and clears when a call of that tool ends. A question asked meanwhile shows first; the approval comes back once it is answered.
+- When an automatic reviewer answers the session's approvals (`meta.auto_review`, Codex's auto-review), a waiting call asks nothing of the person: the session is `reviewing` until the call ends. When `auto_review` is learned after a request, or changes under it, the waiting calls move to their new answerer.
+- A prompt, a new main turn, the end of one or `attention.clear` settles whatever the person was asked; a reviewer's calls keep waiting on it.
 - `busy: false` in a heartbeat means the integration has nothing in flight: the daemon drops any turn or tool whose end event was lost. The plugin says so once when a process starts, for what one that died left unfinished, and once after work it ran itself. Otherwise it leaves `busy` out: one session can be open in two windows, a process each, and one that did nothing would end the turn running in the other.
 - Activity on an ended session revives it (a resume, or heartbeats after a `lost` end).
 
@@ -83,7 +85,7 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 
 **Delivery.** Hooks only append to a queue. `$.clock.after(0)` sends after the hook's dispatch has resolved, so a session never waits on the monitor. One request is in flight at a time, which keeps events ordered. Failures retry with exponential backoff from 1 s to 30 s. The queue holds at most 1,000 events and drops the oldest. On announce, the plugin also reports `$.session.usage()`, so rate limits are known before the first answer.
 
-**Known limitation.** The API has no event for an approval being granted. A long command that was approved shows `waiting_permission` until it finishes; a denied one clears at once.
+**Known limitation.** Nothing says when an approval is granted: Claude Code draws the permission dialog itself and keeps its answer from plugins. A long command that was approved shows `waiting_permission` until it finishes; a denied one clears at once.
 
 ## Codex plugin
 
@@ -96,14 +98,16 @@ Memory, and with it the live view, holds the sessions in use. A running session 
 | `SessionStart`, `SessionEnd` | `session.start` with `source`, `session.end` |
 | `UserPromptSubmit` | `prompt`, `turn.start`, `attend` |
 | `PreToolUse`, `PostToolUse` | `tool.start`, `tool.end`; `request_user_input` also raises `attention` (input) |
-| `PermissionRequest` | `attention` (permission) |
+| `PermissionRequest` | `attention` (permission), which holds the call for review instead under auto-review |
 | `Stop`, `Interrupt` | `turn.end` (answer, aborted) |
 | `SubagentStart`, `SubagentStop` | `turn.start`, `turn.end` with the subagent id |
 | `PreCompact`, `PostCompact` | `compact.start`, `compact.end` |
 
 `request_user_input_async` returns before the person answers and the turn ends with the question open. The adapter remembers the question and raises `attention` (input) after that turn's `turn.end`; the next prompt clears it. Every payload carries `cwd`, `model` and `permission_mode`. `transcript_path` is left out: Codex calls its format unstable and moves the file on archiving or removes it once history moves into its database, so the janitor follows the thread records instead.
 
-**Known limitations.** Codex has no hook for a failed turn, an idle reminder or a granted approval, and command hooks cannot beat: a Codex session that crashes keeps its last status until 12 h of silence end it as `lost`. Hosted tools such as web search run no hooks.
+Codex runs `PermissionRequest` for every escalated command before anyone decides, auto-review included, and the payload does not say who will. `codex.rs` reads it from `approvals_reviewer` in each turn's `turn_context` line of the rollout (`auto_review`, earlier `guardian_subagent`, or `user`) into `meta.auto_review`. The line is written as the turn starts, and the request takes at least a model response more, so the setting is usually known first; when it is not, the request moves within a reading (2 s).
+
+**Known limitations.** Codex has no hook for a failed turn, an idle reminder, a granted approval or a reviewer's answer, and command hooks cannot beat: a Codex session that crashes keeps its last status until 12 h of silence end it as `lost`. Hosted tools such as web search run no hooks.
 
 ## Token accounting
 

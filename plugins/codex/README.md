@@ -6,6 +6,7 @@ Reports what a Codex session is doing to the local [AgentsMonitor](../../README.
 
 - **Command hooks.** Codex runs `hooks/forward.sh` for each of its twelve lifecycle events. It hands the payload to `agentsmon hook --agent codex`, which forwards it to the daemon's Unix socket unchanged and answers `{}`. The daemon's adapter maps it (`crates/agentsmon/src/adapters/codex.rs`). One event costs about 5 ms, mostly process start-up.
 - **Never in the way.** The hooks never approve, deny or change anything. They run synchronously, so events reach the daemon in order, with a 1 s timeout; the forwarder gives up on the daemon after 300 ms. If `agentsmon` is not installed, the script answers `{}` and does nothing.
+- **Auto-review.** Codex asks the hooks about every escalated command, also when its auto-review answers for you. The daemon reads which one answers from the session's rollout log: under auto-review the command shows as `reviewing`, as work, and the display neither alerts nor chimes.
 - **Exact tokens.** Every model request is counted once, by its `response_id`, from the session's rollout log. Requests made while the daemon was down are counted when it is back.
 
 Codex's hooks have no event for a failed turn, no heartbeat and no idle reminder. A session that crashes stays as it was until 12 h of silence end it as `lost`. Codex itself ends a session left idle for 30 min that no client has open.

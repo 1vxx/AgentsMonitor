@@ -58,6 +58,8 @@ export const en = {
   'status.input': 'Needs an answer',
   'status.tool': 'Running {tool}',
   'status.toolAny': 'Running a tool',
+  'status.review': 'Auto-reviewing {tool}',
+  'status.reviewAny': 'Auto-reviewing',
   'status.thinking': 'Thinking',
   'status.compacting': 'Compacting',
   'status.error': 'Last turn failed',

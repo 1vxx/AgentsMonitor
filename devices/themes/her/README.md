@@ -32,6 +32,7 @@ Your agent's state is her mood. What she wants always appears under her words, s
 | Running a command | 帮你跑命令… | *running that for you…* |
 | Starting a subagent | 摇闺蜜帮忙… | *calling the girls for backup…* |
 | Calling an MCP tool | 出门办事… | *popping out for a bit…* |
+| Waiting on Codex's auto-review | 先问问闺蜜… | *let me check with my best friend first…* |
 | Compacting | 选择性失忆中… | *selective amnesia in progress…* |
 | Done | 做好啦，快夸我！ | *all done, tell me I'm great!* |
 | Done, 5 minutes ago, and you never looked | 你都不夸我… | *you never praise me…* |

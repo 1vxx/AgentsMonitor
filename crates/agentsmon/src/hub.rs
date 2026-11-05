@@ -389,7 +389,7 @@ impl Hub {
                             }
                             if !st.forgotten.contains_key(&key) && !st.hidden.contains_key(&key) {
                                 let s = st.session_entry(&self.store, &env.agent, &n.sid, ts);
-                                if s.meta.merge(&n.meta) && !changed.contains(&key) {
+                                if reducer::merge_meta(s, ts, &n.meta) && !changed.contains(&key) {
                                     changed.push(key);
                                 }
                             }
@@ -568,7 +568,7 @@ impl Hub {
         }
         let known = !st.forgotten.contains_key(&key) && st.sessions.contains_key(&key);
         if let Some(s) = st.sessions.get_mut(&key).filter(|_| known) {
-            let mut moved = seen.meta.as_ref().is_some_and(|m| s.meta.merge(m));
+            let mut moved = seen.meta.as_ref().is_some_and(|m| reducer::merge_meta(s, now, m));
             if let Some(context) = seen.context.as_ref().filter(|c| !s.is_ended() && s.context.as_ref() != Some(*c)) {
                 s.context = Some(context.clone());
                 moved = true;
@@ -1143,6 +1143,36 @@ mod tests {
         let s = hub.session("codex:c").unwrap();
         assert!(s.is_ended());
         assert_eq!(s.context.and_then(|c| c.tokens), Some(10));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn an_approval_waits_on_whoever_codex_says_answers_it() {
+        let (hub, dir) = hub("review");
+        let mut rx = hub.subscribe();
+        let hook = |name: &str| {
+            env(&format!(
+                r#"{{"agent":"codex","type":"raw","payload":{{"session_id":"r","hook_event_name":"{name}","tool_name":"Bash","tool_use_id":"c1","tool_input":{{"command":"git push"}}}}}}"#
+            ))
+        };
+        hub.ingest(vec![hook("PreToolUse"), hook("PermissionRequest")]);
+        assert_eq!(hub.session("codex:r").unwrap().status, Status::WaitingPermission);
+
+        // The rollout says auto-review answers: the request was its own all along.
+        while rx.try_recv().is_ok() {}
+        let reviewed = Observed { meta: Some(SessionMeta { auto_review: Some(true), ..Default::default() }), ..Default::default() };
+        assert!(hub.observe("codex", "r", now_ms(), &reviewed));
+        let s = hub.session("codex:r").unwrap();
+        assert_eq!((s.status, s.attention.is_none()), (Status::Reviewing, true));
+        let summary = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|o| serde_json::from_str::<serde_json::Value>(o.text.as_str()).unwrap())
+            .find(|v| v["type"] == "summary")
+            .unwrap();
+        assert_eq!((summary["summary"]["mood"].as_str(), summary["summary"]["counts"]["reviewing"].as_u64()), (Some("working"), Some(1)));
+
+        // Later requests go to the reviewer straight away.
+        hub.ingest(vec![hook("PostToolUse"), hook("PreToolUse"), hook("PermissionRequest")]);
+        assert_eq!(hub.session("codex:r").unwrap().status, Status::Reviewing);
         std::fs::remove_dir_all(dir).ok();
     }
 

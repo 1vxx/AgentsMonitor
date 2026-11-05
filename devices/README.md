@@ -211,7 +211,7 @@ curl -H "Authorization: Bearer <token>" http://<host>:7788/v1/summary
 {
   "ts": 1793087903676,
   "mood": "attention",           // attention > working > error > idle > offline: one colour for the whole screen
-  "counts": { "live": 3, "waiting": 1, "thinking": 1, "tool": 0, "idle": 1, "compacting": 0, "stale": 0 },
+  "counts": { "live": 3, "waiting": 1, "thinking": 1, "tool": 0, "reviewing": 0, "idle": 1, "compacting": 0, "stale": 0 },
   "sessions": [                  // most urgent first, at most eight
     {
       "key": "claude-code:4f0c…", "agent": "claude-code",
@@ -234,7 +234,7 @@ DAEMON = "http://192.168.1.18:7788"   # the machine running agentsmon
 TOKEN = "the-token-from-config.toml"
 
 ICONS = {"waiting_permission": "✋", "waiting_input": "❓", "tool": "🔧",
-         "thinking": "💭", "compacting": "🗜 ", "idle": "💤"}
+         "reviewing": "🔎", "thinking": "💭", "compacting": "🗜 ", "idle": "💤"}
 
 while True:
     req = urllib.request.Request(f"{DAEMON}/v1/summary",

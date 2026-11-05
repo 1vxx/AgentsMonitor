@@ -84,6 +84,37 @@ export const SCENARIOS = [
     ],
   },
   {
+    id: 'auto-review',
+    name: { en: 'Approvals a reviewer answers', zh: '自动审查代为批准' },
+    note: {
+      en: 'A Codex session on auto-review sends two commands to its reviewer: each shows as reviewed work, with no alert and no chime, and runs once approved. At 36 s a Claude Code session asks you instead, as usual.',
+      zh: '一个开着自动审查的 Codex 会话把两条命令交给审查：显示为审查中的工作，不弹提醒、不响，批准后照常执行。36 秒时旁边的 Claude Code 会话照常请你授权。',
+    },
+    length: 60,
+    loop: true,
+    script: [
+      [0, (w, n) => {
+        w.start(n, 'claude-code:b', t('Theme switch polish'))
+        w.tool(n, 'claude-code:b', 'Edit')
+      }],
+      // The newer turn, so the one in front
+      [1, (w, n) => {
+        w.start(n, 'codex:a', { project: 'agentsmon-plugins', title: 'Release the Codex plugin', agent: 'codex' })
+        w.tool(n, 'codex:a', 'Bash')
+      }],
+      [3, (w, n) => w.review(n, 'codex:a', 'Bash')],
+      [12, (w, n) => w.tool(n, 'codex:a', 'Bash')],
+      [15, (w, n) => w.think(n, 'codex:a')],
+      [19, (w, n) => w.review(n, 'codex:a', 'Bash')],
+      [31, (w, n) => w.tool(n, 'codex:a', 'Bash')],
+      [34, (w, n) => w.think(n, 'codex:a')],
+      [36, (w, n) => w.ask(n, 'claude-code:b', { tool: 'Bash', subject: 'git push origin main' })],
+      [48, (w, n) => w.answer(n, 'claude-code:b')],
+      [52, (w, n) => w.finish(n, 'codex:a')],
+      [56, (w, n) => w.finish(n, 'claude-code:b')],
+    ],
+  },
+  {
     id: 'many-waits',
     name: { en: 'Three waiting at once', zh: '三个会话同时等你' },
     note: {

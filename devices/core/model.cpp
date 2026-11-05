@@ -172,6 +172,7 @@ void copy(char *dst, size_t n, const Value &v) {
 Status status(const std::string &s) {
   if (s == "thinking") return Status::Thinking;
   if (s == "tool") return Status::Tool;
+  if (s == "reviewing") return Status::Reviewing;
   if (s == "compacting") return Status::Compacting;
   if (s == "waiting_input") return Status::WaitingInput;
   if (s == "waiting_permission") return Status::WaitingPermission;

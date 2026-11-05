@@ -196,6 +196,9 @@ class Demo:
                     "permission_mode": "default", "interactive": True, "surface": "terminal"}
             if agent == "claude-code":
                 meta["transcript_path"] = str(self.transcript(project, sid))
+            else:
+                # Codex's auto-review answers its approvals, as its rollout log would say
+                meta["auto_review"] = True
             self.send(self.ev(agent, sid, "session.start", source="startup", **meta))
         limits = {
             "claude-code": [{"kind": "five_hour", "percent_used": 34, "resets_at": iso(now + 2 * HOUR + 14 * MIN)},
@@ -228,6 +231,9 @@ class Demo:
                               self.ev("claude-code", "demo-mob", "turn.start"),
                               self.ev("claude-code", "demo-mob", "attention", kind="input", tool="AskUserQuestion",
                                       message="Follow the system theme, or add a toggle?")),
+            lambda: self.send(self.ev("codex", "demo-ml", "prompt", preview="Profile the loader again with the new shards"),
+                              self.ev("codex", "demo-ml", "turn.start"),
+                              *self.reviewed(0)),
         ]
         for step in steps:
             step()
@@ -258,7 +264,20 @@ class Demo:
                 tool, subject = self.rng.choice(work[sid])
                 running[sid] = (f"w{n}", tool)
                 events.append(self.ev("claude-code", sid, "tool.start", id=f"w{n}", tool=tool, subject=subject))
+            # The Codex session's commands wait on its reviewer for 15 s, then run
+            if beat % 15 == 0:
+                review = beat // 15
+                if review % 2:
+                    events.append(self.ev("codex", "demo-ml", "tool.end", id=f"r{review - 1}", tool="Bash", ok=True))
+                else:
+                    events.extend(self.reviewed(review))
             self.send(*events)
+
+    # A command Codex asks approval for, which its auto-review answers
+    def reviewed(self, n):
+        command = ["uv run bench --profile loader", "uv pip install pyarrow==19.0.1", "git push origin loader-shards"][n // 2 % 3]
+        return [self.ev("codex", "demo-ml", "tool.start", id=f"r{n}", tool="Bash", subject=command),
+                self.ev("codex", "demo-ml", "attention", kind="permission", tool="Bash", subject=command)]
 
 
 def main():

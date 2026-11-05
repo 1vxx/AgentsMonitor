@@ -11,11 +11,14 @@ import { Dial } from './Dial.tsx'
 import { Halo } from './Halo.tsx'
 import { EASE, Numeral, rise } from './motion.tsx'
 
+/** Sessions at work: thinking, running a tool or waiting on its review, compacting. */
+const atWork = (c: Summary['counts']) => c.thinking + c.tool + c.reviewing + c.compacting
+
 /** The cover line: what is happening, in a sentence; the key words take the mood's colours. */
 const headline = (summary: Summary | undefined, conn: string): { title: ReactNode; key: string; sub: string } => {
   if (!summary) return { key: 'connecting', title: rich(t(conn === 'closed' ? 'cover.disconnected' : 'cover.connecting')), sub: t('cover.reconnectSub') }
   const c = summary.counts
-  const working = c.thinking + c.tool + c.compacting
+  const working = atWork(c)
   const top = summary.sessions[0]
   switch (summary.mood) {
     case 'attention':
@@ -115,7 +118,7 @@ export const Overview = ({ now, onOpen }: { now: number; onOpen: (key: string) =
   const conn = useLive(s => s.conn)
   const counts = summary?.counts
   const mood = summary?.mood ?? 'offline'
-  const working = counts ? counts.thinking + counts.tool + counts.compacting : 0
+  const working = counts ? atWork(counts) : 0
   const { data: today } = useTokenReport(localMidnight(now))
   const head = headline(summary, conn)
   const headKey = `${head.key}:${locale}`

@@ -169,6 +169,7 @@ The status is derived from what is in flight, never set directly, so a lost or r
 | `waiting_permission` | A tool call waits for approval |
 | `waiting_input` | The agent asked a question (AskUserQuestion, MCP elicitation) |
 | `tool` | A tool is running |
+| `reviewing` | A tool call waits for an automatic reviewer's approval (Codex's auto-review): work, with nothing asked of you |
 | `thinking` | A turn is in progress, or a background subagent is working |
 | `compacting` | The context is being compacted |
 | `idle` | Waiting for the next prompt; `last_turn` records how the last turn ended |

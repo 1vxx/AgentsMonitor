@@ -169,6 +169,7 @@ Claude Code 插件的选项在 `/plugin` 里设置：
 | `waiting_permission` | 有工具调用在等待授权 |
 | `waiting_input` | Agent 提出了问题（AskUserQuestion、MCP elicitation） |
 | `tool` | 有工具正在运行 |
+| `reviewing` | 有工具调用在等自动审查批准（Codex 的自动审查）：算在工作中，不需要你处理 |
 | `thinking` | 一轮对话正在进行，或有后台子 Agent 在工作 |
 | `compacting` | 正在压缩上下文 |
 | `idle` | 等待下一条提示；`last_turn` 记录上一轮是如何结束的 |

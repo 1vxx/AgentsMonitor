@@ -32,7 +32,7 @@ Fields marked `?` are optional.
 
 | `type` | Fields |
 | --- | --- |
-| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `agent_version?` `surface?` `interactive?` `transcript_path?` `title?` (the session's short title; the daemon also reads Claude Code's from its transcript) `tty?` (the terminal it runs in, as `ps` names it) |
+| `session.start` | `source?` (`startup`, `resume`, `clear`, `attach`, …) and session metadata: `cwd?` `project?` `model?` `permission_mode?` `auto_review?` (an automatic reviewer, not the person, answers its approvals: an `attention` (permission) then holds the call as `reviewing`; the daemon reads Codex's from its rollout logs) `agent_version?` `surface?` `interactive?` `transcript_path?` `title?` (the session's short title; the daemon also reads Claude Code's from its transcript) `tty?` (the terminal it runs in, as `ps` names it) |
 | `session.end` | `reason?` |
 | `heartbeat` | `busy?` and session metadata |
 | `prompt` | `preview?` |

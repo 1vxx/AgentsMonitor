@@ -375,12 +375,13 @@ const newSession = () => {
   world.tool(now(), key, anyOf(['Read', 'Edit', 'Bash', 'Grep']))
   return key
 }
-const working = () => world.list.filter(s => ['thinking', 'tool', 'compacting'].includes(s.status) && !s.stale)
+const working = () => world.list.filter(s => ['thinking', 'tool', 'reviewing', 'compacting'].includes(s.status) && !s.stale)
 const anyWorking = () => anyOf(working())?.key ?? newSession()
 
 const EVENTS = {
   permission: () => world.ask(now(), newSession(), { tool: 'Bash', subject: anyOf(COMMANDS) }),
   input: () => world.ask(now(), anyWorking(), { kind: 'input', tool: 'AskUserQuestion', message: 'Fix the failing tests first, or commit what is there?' }),
+  review: () => world.review(now(), anyWorking(), 'Bash'),
   answer: () => world.list.forEach(s => world.answer(now(), s.key)),
   done: () => world.finish(now(), anyWorking(), 'answer'),
   open: () => world.list.forEach(s => world.open(now(), s.key)),
@@ -449,7 +450,7 @@ segmented('fps', saved('am.fps') ?? '60', v => {
   save('am.fps', v)
 })
 
-const SESSION_TONES = { waiting_permission: 'attn', waiting_input: 'attn', thinking: 'work', tool: 'work', compacting: 'work' }
+const SESSION_TONES = { waiting_permission: 'attn', waiting_input: 'attn', thinking: 'work', tool: 'work', reviewing: 'work', compacting: 'work' }
 const toneOf = s => {
   if (s.stale) return 'rest'
   if (SESSION_TONES[s.status]) return SESSION_TONES[s.status]
@@ -476,7 +477,8 @@ const showSessions = list => {
       name.append(proj)
       const state = document.createElement('span')
       state.className = 'state'
-      const what = s.stale ? t('status.stale') : `${t(`status.${s.status}`)}${s.status === 'tool' && s.tool ? ` ${s.tool}` : ''}`
+      const named = (s.status === 'tool' || s.status === 'reviewing') && s.tool
+      const what = s.stale ? t('status.stale') : `${t(`status.${s.status}`)}${named ? ` ${s.tool}` : ''}`
       const end = s.status === 'idle' && s.last_turn ? ` · ${s.last_turn.outcome}` : ''
       state.textContent = what + end
       li.append(document.createElement('i'), name, state)

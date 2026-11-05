@@ -557,6 +557,10 @@ void act(const Session *f) {
   switch (f->status) {
     case Status::Thinking: want = "think", say("对方正在输入…"); return;
     case Status::Tool: busyWith(f->tool); return;
+    // An automatic reviewer has the call: nothing for you to do. Her lines
+    // draw from glyphs packs bake in, so this one uses only those her other
+    // lines have, and packs made before it still say it
+    case Status::Reviewing: want = "think", say("先问问闺蜜…"); return;
     case Status::Compacting:
       want = "compact", say("选择性失忆中…");
       if (f->context >= 0) snprintf(sub, sizeof sub, "记仇小本本 %d%% 满了，撕掉几页", int(f->context + 0.5f));

@@ -26,6 +26,7 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
             Status::Idle => counts.idle += 1,
             Status::Thinking => counts.thinking += 1,
             Status::Tool => counts.tool += 1,
+            Status::Reviewing => counts.reviewing += 1,
             Status::Compacting => counts.compacting += 1,
             Status::WaitingInput | Status::WaitingPermission => counts.waiting += 1,
             Status::Ended => {}
@@ -77,7 +78,14 @@ pub fn build<'a>(sessions: impl Iterator<Item = &'a Session>, quotas: &[Quota], 
                 status: s.status,
                 since: s.status_since,
                 turn_since: turn_since(s),
-                tool: s.tools.last().map(|t| t.tool.clone()),
+                // The call under review, when one is: it is what holds the session.
+                tool: s
+                    .tools
+                    .iter()
+                    .rev()
+                    .find(|t| t.approval.is_some_and(|a| a.reviewer))
+                    .or(s.tools.last())
+                    .map(|t| t.tool.clone()),
                 stale: s.stale,
                 attention: s.attention.as_ref().map(|a| AttentionBrief {
                     kind: a.kind,
@@ -143,8 +151,8 @@ pub fn same(a: &Summary, b: &Summary) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reducer::{apply, new_session};
-    use agentsmon_protocol::{AttentionKind, ContextUsage, Event};
+    use crate::reducer::{apply, merge_meta, new_session};
+    use agentsmon_protocol::{AttentionKind, ContextUsage, Event, SessionMeta};
 
     #[test]
     fn waiting_wins_and_sorts_first() {
@@ -228,6 +236,23 @@ mod tests {
         let subject = wait.subject.as_deref().unwrap();
         assert!(subject.starts_with("npm run build") && subject.ends_with('…') && subject.chars().count() == MAX_TEXT);
         assert_eq!(summary.sessions[1].last_turn, Some(TurnBrief { outcome: TurnOutcome::Error, ended_at: 5, seen: false }));
+    }
+
+    #[test]
+    fn a_call_under_review_is_work_and_names_the_tool() {
+        let mut s = new_session("codex", "r", 0);
+        merge_meta(&mut s, 0, &SessionMeta { auto_review: Some(true), ..Default::default() });
+        let start = |id: &str, tool: &str| Event::ToolStart { id: Some(id.into()), tool: tool.into(), agent_id: None, subject: None };
+        apply(&mut s, 1, &Event::TurnStart { turn_id: None, agent_id: None, preview: None });
+        apply(&mut s, 2, &start("push", "Bash"));
+        apply(&mut s, 3, &Event::Attention { kind: AttentionKind::Permission, tool: Some("Bash".into()), subject: None, message: None });
+        apply(&mut s, 4, &start("look", "web_search"));
+
+        let summary = build([&s].into_iter(), &[], 10);
+        assert_eq!(summary.mood, Mood::Working);
+        assert_eq!((summary.counts.reviewing, summary.counts.waiting), (1, 0));
+        let item = &summary.sessions[0];
+        assert_eq!((item.status, item.tool.as_deref(), item.attention.is_none()), (Status::Reviewing, Some("Bash"), true));
     }
 
     #[test]

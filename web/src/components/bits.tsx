@@ -31,6 +31,10 @@ export const statusView = (s: StatusFacts): StatusView => {
       const tool = s.tools?.at(-1)?.tool
       return { label: tool ? t('status.tool', { tool: shortTool(tool) }) : t('status.toolAny'), tone: 'active', icon: 'spin' }
     }
+    case 'reviewing': {
+      const tool = s.tools?.findLast(t => t.approval?.reviewer)?.tool
+      return { label: tool ? t('status.review', { tool: shortTool(tool) }) : t('status.reviewAny'), tone: 'active', icon: 'pulse' }
+    }
     case 'thinking':
       return { label: t('status.thinking'), tone: 'active', icon: 'pulse' }
     case 'compacting':

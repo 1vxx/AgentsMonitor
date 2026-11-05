@@ -55,6 +55,8 @@ export const zh: Record<Key, Message> = {
   'status.input': '等待回答',
   'status.tool': '执行 {tool}',
   'status.toolAny': '执行工具',
+  'status.review': '自动审查 {tool}',
+  'status.reviewAny': '自动审查中',
   'status.thinking': '思考中',
   'status.compacting': '压缩上下文',
   'status.error': '上轮出错',

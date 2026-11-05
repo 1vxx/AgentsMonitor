@@ -5,7 +5,7 @@ const ERROR_MOOD_MS = 5 * 60_000
 const MAX_ITEMS = 8
 
 const isWaiting = s => s.status === 'waiting_input' || s.status === 'waiting_permission'
-const isWorking = s => s.status === 'thinking' || s.status === 'tool' || s.status === 'compacting'
+const isWorking = s => s.status === 'thinking' || s.status === 'tool' || s.status === 'reviewing' || s.status === 'compacting'
 
 // While it works a session uses tokens (cache reads most of them) and fills
 // its context; each starts from its own amount, so no two read alike
@@ -60,6 +60,11 @@ export class World {
     this.touch(now, key, { status: 'tool', since: now, tool })
   }
 
+  // A call waits for an automatic reviewer's approval, not the person's
+  review(now, key, tool) {
+    this.touch(now, key, { status: 'reviewing', since: now, tool: tool ?? this.sessions.get(key)?.tool })
+  }
+
   ask(now, key, { kind = 'permission', tool, subject, message } = {}) {
     this.touch(now, key, {
       status: kind === 'input' ? 'waiting_input' : 'waiting_permission',
@@ -98,7 +103,7 @@ export class World {
 
   summary(now) {
     const live = this.list
-    const counts = { live: 0, idle: 0, thinking: 0, tool: 0, compacting: 0, waiting: 0, stale: 0 }
+    const counts = { live: 0, idle: 0, thinking: 0, tool: 0, reviewing: 0, compacting: 0, waiting: 0, stale: 0 }
     let errored = false
     for (const s of live) {
       counts.live++

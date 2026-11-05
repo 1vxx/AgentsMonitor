@@ -1,6 +1,6 @@
 // Mirror of crates/agentsmon-protocol: what the daemon sends.
 
-export type Status = 'ended' | 'idle' | 'compacting' | 'thinking' | 'tool' | 'waiting_input' | 'waiting_permission'
+export type Status = 'ended' | 'idle' | 'compacting' | 'thinking' | 'tool' | 'reviewing' | 'waiting_input' | 'waiting_permission'
 export type Mood = 'offline' | 'idle' | 'error' | 'working' | 'attention'
 export type TurnOutcome = 'answer' | 'aborted' | 'refusal' | 'error'
 export type AttentionKind = 'permission' | 'input' | 'idle'
@@ -10,6 +10,8 @@ export interface SessionMeta {
   project?: string
   model?: string
   permission_mode?: string
+  /** An automatic reviewer, not the person, answers its approval requests. */
+  auto_review?: boolean
   agent_version?: string
   surface?: string
   interactive?: boolean
@@ -30,6 +32,8 @@ export interface ActiveTool {
   subject?: string
   agent_id?: string
   started_at: number
+  /** Waits for approval, until the call ends: since when, and whether an automatic reviewer answers it. */
+  approval?: { since: number; reviewer?: boolean }
 }
 
 export interface Session {
@@ -139,7 +143,7 @@ export interface SummaryItem {
 export interface Summary {
   ts: number
   mood: Mood
-  counts: { live: number; idle: number; thinking: number; tool: number; compacting: number; waiting: number; stale: number }
+  counts: { live: number; idle: number; thinking: number; tool: number; reviewing: number; compacting: number; waiting: number; stale: number }
   sessions: SummaryItem[]
   quotas: { agent: string; windows: [string, number][] }[]
 }

@@ -105,7 +105,7 @@ And what the host offers a theme:
 
 - **One folder.** `themes/<name>/` holds `ui.cpp`, any files of its own, and a `theme.json` with its name and a one-line description in English and Chinese. The folder name is lowercase, and is also the C++ namespace.
 - **No platform code.** No Arduino or ESP-IDF headers: the same files build for the browser and every board.
-- **Every state shows.** Waiting for approval or an answer, thinking, running a tool, compacting, finished, failed, idle, no signal, no sessions, connecting and link lost. The review page's demo scripts walk through all of them.
+- **Every state shows.** Waiting for approval or an answer, thinking, running a tool, a tool call under automatic review, compacting, finished, failed, idle, no signal, no sessions, connecting and link lost. The review page's demo scripts walk through all of them.
 - **Bands draw alike.** `draw()` reads only what `frame()` left, so drawing a frame in 16-row bands on two cores gives the same pixels as drawing it whole. `snap.mjs check` proves it.
 - **Fast enough.** Aim for 30 fps or better on the reference board; halo and pets run near 60, and `her` about 36 with photos to decode. The board's serial log prints the frame rate and time every second. Big tables belong in PSRAM (`gfx::bigAlloc`): internal RAM is kept for Wi-Fi.
 - **Kind to an AMOLED.** Mostly black, and nothing bright in one place for hours. `halo` and `pets` shift a few pixels every few minutes, and `her` never holds still.
